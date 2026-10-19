@@ -33,6 +33,7 @@ function authorized(req, res, next) {
   next();
 }
 
+app.get('/', (_req, res) => res.json({ ok: true, service: 'WUK AI Gemini backend', health: '/health' }));
 app.get('/health', (_req, res) => res.json({ ok: true, service: 'WUK AI Gemini backend' }));
 
 const chatLimit = rateLimit({
