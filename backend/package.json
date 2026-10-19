@@ -5,7 +5,10 @@
   "description": "Private authenticated Node.js backend for WUK AI by Wuk72",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test",
+    "cloudflare:dev": "wrangler dev",
+    "deploy": "wrangler deploy"
   },
   "engines": {
     "node": ">=22.13.0"
@@ -16,6 +19,9 @@
     "express": "^5.1.0",
     "express-rate-limit": "^8.1.0",
     "helmet": "^8.1.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.151.2"
   },
   "type": "module"
 }

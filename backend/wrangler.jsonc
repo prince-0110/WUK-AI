@@ -1,0 +1,17 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "wuk-ai-api",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-20",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "enable_nodejs_http_server_modules"
+  ],
+  "workers_dev": true,
+  "vars": {
+    "NODE_ENV": "production"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

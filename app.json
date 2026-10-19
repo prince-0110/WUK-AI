@@ -20,6 +20,8 @@
       }
     },
     "web": {
+      "bundler": "metro",
+      "output": "single",
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
@@ -29,7 +31,9 @@
         {
           "microphonePermission": "WUK AI uses the microphone only when you tap voice input.",
           "speechRecognitionPermission": "WUK AI converts your speech to editable text for your message.",
-          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
         }
       ],
       [
@@ -50,7 +54,8 @@
             "enableMinifyInReleaseBuilds": true
           }
         }
-      ]
+      ],
+      "expo-sharing"
     ],
     "extra": {
       "eas": {
