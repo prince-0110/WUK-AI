@@ -6,7 +6,7 @@ import { createProviders, providerCandidates, ProviderError, withProviderFallbac
 import { createCorsMiddleware } from './cors.js';
 
 export const port = Number(process.env.PORT || 8787);
-const accessToken = process.env.API_ACCESS_TOKEN || '';
+const accessPassword = process.env.API_ACCESS_PASSWORD || process.env.API_ACCESS_TOKEN || '';
 const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 const imageModel = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
 
@@ -21,10 +21,10 @@ app.use(express.json({ limit: '6mb', strict: true }));
 function authorized(req, res, next) {
   const header = req.get('authorization') || '';
   const supplied = header.startsWith('Bearer ') ? header.slice(7) : '';
-  const expectedBytes = Buffer.from(accessToken);
+  const expectedBytes = Buffer.from(accessPassword);
   const suppliedBytes = Buffer.from(supplied);
-  const valid = accessToken.length >= 32 && expectedBytes.length === suppliedBytes.length && crypto.timingSafeEqual(expectedBytes, suppliedBytes);
-  if (!valid) return res.status(401).json({ error: 'Invalid backend access token.' });
+  const valid = accessPassword.length >= 12 && expectedBytes.length === suppliedBytes.length && crypto.timingSafeEqual(expectedBytes, suppliedBytes);
+  if (!valid) return res.status(401).json({ error: 'Incorrect backend password.' });
   next();
 }
 

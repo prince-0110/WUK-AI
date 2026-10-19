@@ -327,8 +327,8 @@ export default function App() {
     if (!accessToken.trim()) {
       updateDelivery(id, userMessage.id, 'failed');
       setConnection('reachable');
-      setConnectionMessage('Backend is up · access token needed');
-      setBanner('This message is saved on your phone but wasn’t sent. Add the backend access token in Settings, then tap Retry.');
+      setConnectionMessage('Backend is up · password needed');
+      setBanner('This message is saved on your phone but wasn’t sent. Add the backend password in Settings, then tap Retry.');
       return;
     }
     await startRequest(id, nextMessages, userMessage.id, {
@@ -342,7 +342,7 @@ export default function App() {
     if (busy || !activeConversation || !message) return;
     const index = messages.findIndex(item => item.id === message.id);
     if (index === -1 || message.role !== 'user') return;
-    if (!accessToken.trim()) { setBanner('Add the backend access token in Settings, then retry this message.'); return; }
+    if (!accessToken.trim()) { setBanner('Add the backend password in Settings, then retry this message.'); return; }
     const id = activeConversation.id;
     const transcript = messages.slice(0, index + 1).map(item => ({ ...item, delivery: item.id === message.id ? 'pending' : item.delivery }));
     updateConversation(id, list => [...list.slice(0, index), { ...list[index], delivery: 'pending' }, ...list.slice(index + 1)]);
@@ -452,7 +452,7 @@ export default function App() {
     const url = draftUrl.trim().replace(/\/+$/, '');
     if (!/^https?:\/\//i.test(url)) { Alert.alert('Check the server address', 'Enter a complete address beginning with https:// or http://.'); return; }
     setBackendUrl(url); setAccessToken(draftToken.trim()); setSettingsOpen(false);
-    setConnection('reachable'); setConnectionMessage(draftToken.trim() ? 'Connection saved · run a test to check configured providers' : 'Backend address saved · add access token to use AI');
+    setConnection('reachable'); setConnectionMessage(draftToken.trim() ? 'Connection saved · run a test to check configured providers' : 'Backend address saved · add password to use AI');
     setBanner('');
   }
 
@@ -586,7 +586,7 @@ export default function App() {
           <View style={styles.sectionCard}><Text style={styles.cardEyebrow}>SERVER-MANAGED PROVIDERS</Text><Pressable accessibilityRole="radio" accessibilityState={{ selected: selectedProvider === 'auto' }} onPress={() => setSelectedProvider('auto')} style={[styles.providerChoice, selectedProvider === 'auto' && styles.providerChoiceSelected]}><View style={{ flex: 1 }}><Text style={styles.settingTitle}>Auto · Best available</Text><Text style={styles.settingDescription}>Chooses a provider that supports the task and tries another compatible provider after a rate limit or outage.</Text></View><Text style={styles.providerCheck}>{selectedProvider === 'auto' ? '✓' : ''}</Text></Pressable>{providers.map(item => <Pressable key={item.id} accessibilityRole="radio" accessibilityState={{ selected: selectedProvider === item.id, disabled: !item.configured }} disabled={!item.configured} onPress={() => setSelectedProvider(item.id)} style={[styles.providerChoice, selectedProvider === item.id && styles.providerChoiceSelected, !item.configured && styles.disabled]}><View style={{ flex: 1 }}><Text style={styles.settingTitle}>{item.name}{item.model ? ` · ${item.model}` : ''}</Text><Text style={styles.settingDescription}>{item.configured ? `Available · ${item.capabilities.join(', ')}` : 'Not configured on backend'}</Text></View><Text style={styles.providerCheck}>{selectedProvider === item.id ? '✓' : ''}</Text></Pressable>)}<Text style={styles.dataFootnote}>Provider credentials are stored on your backend and shared by this installation. They are API credentials, not your Gemini/Claude/ChatGPT consumer subscriptions. Providers may charge separately; automatic fallback can send the same request to another provider.</Text></View>
           <Pressable accessibilityRole="button" onPress={() => setResearchMode(value => value === 'automatic' ? 'off' : value === 'off' ? 'always' : 'automatic')} style={styles.settingCard}><View style={{ flex: 1 }}><Text style={styles.settingTitle}>Web research · {researchMode === 'automatic' ? 'Automatic' : researchMode === 'always' ? 'Always' : 'Off'}</Text><Text style={styles.settingDescription}>{researchMode === 'automatic' ? 'Search likely current topics such as news, prices, and current docs.' : researchMode === 'always' ? 'Use the selected provider’s search tool for every text question.' : 'Do not request web search.'}</Text></View><Text style={styles.settingChevron}>↻</Text></Pressable>
           <View style={styles.settingCard}><View style={{ flex: 1 }}><Text style={styles.settingTitle}>Allow provider fallback</Text><Text style={styles.settingDescription}>Auto always tries compatible alternatives. With a specific provider selected, this can retry on another compatible provider after a quota or service failure.</Text></View><SwitchRow value={allowFallback} onValueChange={setAllowFallback} label="Allow fallback to another provider when selecting a specific provider" /></View>
-          <View style={styles.aboutCard}><Text style={styles.aboutTitle}>Connection status</Text><Text style={styles.settingDescription}>{connectionMessage}</Text><Text style={styles.settingUrl}>{backendUrl}</Text><Action label="CONFIGURE BACKEND ACCESS" quiet onPress={() => { setDraftUrl(backendUrl); setDraftToken(accessToken); setSettingsOpen(true); }} /></View>
+          <View style={styles.aboutCard}><Text style={styles.aboutTitle}>Connection status</Text><Text style={styles.settingDescription}>{connectionMessage}</Text><Text style={styles.settingUrl}>{backendUrl}</Text><Action label="CONFIGURE BACKEND PASSWORD" quiet onPress={() => { setDraftUrl(backendUrl); setDraftToken(accessToken); setSettingsOpen(true); }} /></View>
           <Text style={styles.smallHint}>Personal OAuth accounts, a per-user credential vault, and ChatGPT plan-sharing authorization are not available in this project yet. OpenAI partner eligibility is required for using a ChatGPT plan in a third-party app.</Text>
         </ScrollView> : <ScrollView style={styles.content} contentContainerStyle={styles.pageContent}>
           <Text style={styles.pageEyebrow}>PREFERENCES & DIAGNOSTICS</Text><Text style={styles.pageTitle}>Settings</Text>
@@ -618,10 +618,10 @@ export default function App() {
 
       <Modal visible={settingsOpen} transparent animationType="fade" onRequestClose={() => setSettingsOpen(false)}>
         <View style={styles.modalBackdrop}><ScrollView contentContainerStyle={styles.modalScroll} keyboardShouldPersistTaps="handled"><View style={styles.settingsModal}>
-          <Text style={styles.pageEyebrow}>WUK72 · PRIVATE CONNECTION</Text><Text style={styles.modalTitle}>Backend connection</Text><Text style={styles.modalDescription}>The app calls your Node backend. Provider API keys stay in the server environment. The backend access token is kept only in app memory for this session.</Text>
+          <Text style={styles.pageEyebrow}>WUK72 · PRIVATE CONNECTION</Text><Text style={styles.modalTitle}>Backend connection</Text><Text style={styles.modalDescription}>The app calls your Node backend. Provider API keys stay in the server environment. The backend password is kept only in app memory for this session.</Text>
           <Text style={styles.fieldLabel}>BACKEND URL</Text><TextInput value={draftUrl} onChangeText={setDraftUrl} autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholder="https://wuk-ai.onrender.com" placeholderTextColor={c.secondaryText} style={styles.fieldInput} />
-          <Text style={styles.fieldLabel}>BACKEND ACCESS TOKEN</Text><TextInput value={draftToken} onChangeText={setDraftToken} autoCapitalize="none" autoCorrect={false} secureTextEntry placeholder="Enter token from backend environment" placeholderTextColor={c.secondaryText} style={styles.fieldInput} />
-          <Text style={styles.fieldHint}>Health check proves the service is reachable. The authenticated status check reports server-configured providers. The token is not saved to chat history or local storage.</Text>
+          <Text style={styles.fieldLabel}>BACKEND PASSWORD</Text><TextInput value={draftToken} onChangeText={setDraftToken} autoCapitalize="none" autoCorrect={false} secureTextEntry placeholder="Enter the backend password" placeholderTextColor={c.secondaryText} style={styles.fieldInput} />
+          <Text style={styles.fieldHint}>Health check proves the service is reachable. The authenticated status check reports server-configured providers. The password is kept only in memory for this session and is not saved to chat history or local storage.</Text>
           <View style={styles.modalActions}><Action label="CANCEL" quiet onPress={() => setSettingsOpen(false)} /><Action label={checking ? 'CHECKING…' : 'TEST CONNECTION'} quiet disabled={checking} onPress={testConnection} /></View>
           <View style={styles.modalActions}><Action label="SAVE CONNECTION" onPress={saveConnection} /><Action label="OPEN HEALTH" quiet onPress={() => Linking.openURL(`${draftUrl.trim().replace(/\/+$/, '')}/health`)} /></View>
           {checking ? <View style={styles.checkingRow}><ActivityIndicator color={c.deepBlue} /><Text style={styles.fieldHint}>Render may need a moment to wake up.</Text></View> : null}

@@ -52,7 +52,7 @@ npm run deploy
 Wrangler prints the Worker URL, usually `https://wuk-ai-api.<your-account>.workers.dev`. Add the backend secrets through Wrangler's prompts; enter only keys you actually use. Never commit these values or place them in the Expo website build variables.
 
 ```powershell
-npx wrangler secret put API_ACCESS_TOKEN
+npx wrangler secret put API_ACCESS_PASSWORD
 npx wrangler secret put GEMINI_API_KEY
 npx wrangler secret put OPENAI_API_KEY
 npx wrangler secret put ANTHROPIC_API_KEY
@@ -64,7 +64,7 @@ npx wrangler secret put CLOUDFLARE_ACCOUNT_ID
 npx wrangler secret put WEB_ORIGINS
 ```
 
-`API_ACCESS_TOKEN` must be a random value of at least 32 characters. Generate one locally with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`, then enter the same value into WUK AI's connection settings when the website is live. Provider keys are optional; add only the ones enabled for your account. For the Cloudflare Workers AI provider, create a narrowly scoped token with **Workers AI – Read** and **Workers AI – Edit**, and also set the account ID. Store its model API token under `CLOUDFLARE_WORKERS_AI_API_TOKEN`; Wrangler reserves `CLOUDFLARE_API_TOKEN` for deployment authentication. `WEB_ORIGINS` is the exact Pages website origin (for example `https://wuk-ai.pages.dev`), with no trailing slash. If you change the site domain later, update this secret and redeploy the Worker.
+`API_ACCESS_PASSWORD` is a private passphrase of at least 12 characters. Set it in the backend and enter the same password in WUK AI settings; avoid short PINs because the Worker is public. Provider keys are optional; add only the ones enabled for your account. For the Cloudflare Workers AI provider, create a narrowly scoped token with **Workers AI – Read** and **Workers AI – Edit**, and also set the account ID. Store its model API token under `CLOUDFLARE_WORKERS_AI_API_TOKEN`; Wrangler reserves `CLOUDFLARE_API_TOKEN` for deployment authentication. `WEB_ORIGINS` is the exact Pages website origin (for example `https://wuk-ai.pages.dev`), with no trailing slash. If you change the site domain later, update this secret and redeploy the Worker.
 
 The Worker configuration enables the Cloudflare Node.js compatibility needed for Express. Worker memory is temporary and not shared across all Cloudflare locations; for production-wide request quotas, configure Cloudflare rate-limiting rules in the dashboard as well as the backend's per-instance request limits.
 
@@ -78,13 +78,13 @@ The Worker configuration enables the Cloudflare Node.js compatibility needed for
 6. Select **Save and Deploy**. Pages gives the site a `*.pages.dev` URL. Add a custom domain from the Pages project's **Custom domains** settings if you want one.
 7. If you used a custom site domain, update the Worker secret `WEB_ORIGINS` to that exact `https://` origin.
 
-Cloudflare Pages rebuilds the website after pushes to `main`. When you change backend code or provider adapters, redeploy the Worker from `backend/` with `npm run deploy`. After Pages finishes, open the site, open WUK AI **Settings → AI connection**, enter the Worker URL and the same `API_ACCESS_TOKEN`, tap **Test connection**, then save. The token is not compiled into the website and is not saved by this app to its persistent local history.
+Cloudflare Pages rebuilds the website after pushes to `main`. When you change backend code or provider adapters, redeploy the Worker from `backend/` with `npm run deploy`. After Pages finishes, open the site, open WUK AI **Settings → AI connection**, enter the Worker URL and the same `API_ACCESS_PASSWORD`, tap **Test connection**, then save. The password is not compiled into the website and stays in memory for the current app session.
 
-The web front end and Worker are separate Cloudflare deployments: Pages serves the Expo website and the Worker answers `/health` and `/api/*`. The website itself can load without AI configured; online chat, image questions, and image generation require a reachable Worker, the access token, and at least one configured provider. Notes, local chat history, and local commands remain on the device/browser. Keep `backend/.env` for local development only; production keys belong in Cloudflare Worker secrets.
+The web front end and Worker are separate Cloudflare deployments: Pages serves the Expo website and the Worker answers `/health` and `/api/*`. The website itself can load without AI configured; online chat, image questions, and image generation require a reachable Worker, the password, and at least one configured provider. Notes, local chat history, and local commands remain on the device/browser. Keep `backend/.env` for local development only; production keys belong in Cloudflare Worker secrets.
 
 ## Connect the private backend
 
-Set a strong `API_ACCESS_TOKEN` in the backend host's environment variables (for Render: **Dashboard → WUK AI service → Environment**). Use the exact same value in **WUK AI → Settings → AI connection → Backend access token**, then tap **Test connection** and **Save connection**. Generate a random token locally with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`; paste that value directly into Render's `API_ACCESS_TOKEN` and the app's token field. Do not use the Gemini key here. The app keeps this access token in memory for the current session and does not save it to local storage. Keep `GEMINI_API_KEY` only in the backend host's environment; never put either secret in mobile source, Expo `EXPO_PUBLIC_` variables, or this repository.
+Set a private passphrase of at least 12 characters as `API_ACCESS_PASSWORD` in the backend host environment (for Render: **Dashboard → WUK AI service → Environment**). Enter the same password in **WUK AI → Settings → AI connection → Backend password**, then tap **Test connection** and **Save connection**. Avoid short PINs because the backend is reachable over the public internet. Do not use the Gemini key here. The app keeps this password in memory for the current session and does not save it to local storage. Keep `GEMINI_API_KEY` only in the backend host's environment; never put either secret in mobile source, Expo `EXPO_PUBLIC_` variables, or this repository.
 
 Photo questions and image creation use whichever configured provider supports that operation. Supported adapters include Gemini, OpenAI, Claude, Groq, OpenRouter, Cloudflare Workers AI, and Mistral for vision; Gemini, OpenAI, OpenRouter, Cloudflare Workers AI, and Mistral for image generation. Groq does not advertise image generation in its current adapter. Actual model availability depends on the selected model, provider account, region, and quota. Generated and attached images are cached locally on the phone; clearing temporary cache removes those image files while retaining the text conversation.
 

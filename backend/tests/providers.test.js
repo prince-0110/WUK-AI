@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { chooseFallbackProvider, createProviders, isFallbackEligible, ProviderError } from '../providers.js';
 
 const env = {
-  API_ACCESS_TOKEN: 'a'.repeat(64),
+  API_ACCESS_PASSWORD: 'test-password-123',
   GEMINI_API_KEY: 'test-gemini-key',
   OPENAI_API_KEY: 'test-openai-key',
   ANTHROPIC_API_KEY: 'test-anthropic-key'
