@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true
     },
@@ -13,7 +13,7 @@
       "package": "com.wuk72.wukai",
       "versionCode": 1,
       "adaptiveIcon": {
-        "backgroundColor": "#050806",
+        "backgroundColor": "#A8D3F0",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -24,6 +24,14 @@
     },
     "plugins": [
       "expo-status-bar",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "WUK AI uses the microphone only when you tap voice input.",
+          "speechRecognitionPermission": "WUK AI converts your speech to editable text for your message.",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+        }
+      ],
       [
         "expo-build-properties",
         {
