@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "wuk-ai-api",
+  "account_id": "49674dabadb0d94a8ed04930db9d9395",
   "main": "worker.js",
   "compatibility_date": "2026-10-20",
   "compatibility_flags": [

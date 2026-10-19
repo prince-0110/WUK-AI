@@ -59,12 +59,12 @@ npx wrangler secret put ANTHROPIC_API_KEY
 npx wrangler secret put GROQ_API_KEY
 npx wrangler secret put OPENROUTER_API_KEY
 npx wrangler secret put MISTRAL_API_KEY
-npx wrangler secret put CLOUDFLARE_API_TOKEN
+npx wrangler secret put CLOUDFLARE_WORKERS_AI_API_TOKEN
 npx wrangler secret put CLOUDFLARE_ACCOUNT_ID
 npx wrangler secret put WEB_ORIGINS
 ```
 
-`API_ACCESS_TOKEN` must be a random value of at least 32 characters. Generate one locally with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`, then enter the same value into WUK AI's connection settings when the website is live. Provider keys are optional; add only the ones enabled for your account. For the Cloudflare Workers AI provider, create a narrowly scoped token with **Workers AI – Read** and **Workers AI – Edit**, and also set the account ID. `WEB_ORIGINS` is the exact Pages website origin (for example `https://wuk-ai.pages.dev`), with no trailing slash. If you change the site domain later, update this secret and redeploy the Worker.
+`API_ACCESS_TOKEN` must be a random value of at least 32 characters. Generate one locally with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`, then enter the same value into WUK AI's connection settings when the website is live. Provider keys are optional; add only the ones enabled for your account. For the Cloudflare Workers AI provider, create a narrowly scoped token with **Workers AI – Read** and **Workers AI – Edit**, and also set the account ID. Store its model API token under `CLOUDFLARE_WORKERS_AI_API_TOKEN`; Wrangler reserves `CLOUDFLARE_API_TOKEN` for deployment authentication. `WEB_ORIGINS` is the exact Pages website origin (for example `https://wuk-ai.pages.dev`), with no trailing slash. If you change the site domain later, update this secret and redeploy the Worker.
 
 The Worker configuration enables the Cloudflare Node.js compatibility needed for Express. Worker memory is temporary and not shared across all Cloudflare locations; for production-wide request quotas, configure Cloudflare rate-limiting rules in the dashboard as well as the backend's per-instance request limits.
 

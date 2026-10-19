@@ -52,7 +52,10 @@ async function fetchImage(ProviderError, provider, url, headers = {}) {
 export function createAdditionalProviders(env, { ProviderError, normalizeCitations }) {
   const groqKey = isConfigured(env.GROQ_API_KEY) ? env.GROQ_API_KEY : '';
   const routerKey = isConfigured(env.OPENROUTER_API_KEY) ? env.OPENROUTER_API_KEY : '';
-  const cloudflareKey = isConfigured(env.CLOUDFLARE_API_TOKEN) ? env.CLOUDFLARE_API_TOKEN : '';
+  // CLOUDFLARE_API_TOKEN is reserved by Wrangler for deployment authentication.
+  // Prefer the explicit Workers AI name; accept the legacy name for existing hosts.
+  const cloudflareToken = env.CLOUDFLARE_WORKERS_AI_API_TOKEN || env.CLOUDFLARE_API_TOKEN;
+  const cloudflareKey = isConfigured(cloudflareToken) ? cloudflareToken : '';
   const cloudflareAccount = env.CLOUDFLARE_ACCOUNT_ID || '';
   const mistralKey = isConfigured(env.MISTRAL_API_KEY) ? env.MISTRAL_API_KEY : '';
   const groqModel = env.GROQ_MODEL || 'openai/gpt-oss-20b';
