@@ -7,7 +7,6 @@ import { GoogleGenAI } from '@google/genai';
 import { rateLimit } from 'express-rate-limit';
 
 const app = express();
-const host = process.env.HOST || '127.0.0.1';
 const port = Number(process.env.PORT || 8787);
 const accessToken = process.env.API_ACCESS_TOKEN || '';
 const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
@@ -92,7 +91,7 @@ app.use((error, _req, res, _next) => {
   return res.status(500).json({ error: 'Unexpected backend error.' });
 });
 
-app.listen(port, host, () => {
-  console.log(`WUK AI Gemini backend listening on http://${host}:${port}`);
+app.listen(port, '0.0.0.0', () => {
+  console.log(`WUK AI Gemini backend listening on port ${port}`);
   console.log(`Model: ${gemini ? model : 'not configured (health checks only)'}`);
 });
