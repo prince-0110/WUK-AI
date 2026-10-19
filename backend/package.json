@@ -1,0 +1,21 @@
+{
+  "name": "wuk-ai-private-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Private authenticated Node.js backend for WUK AI by Wuk72",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "dependencies": {
+    "@google/genai": "^2.30.0",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.1.0",
+    "helmet": "^8.1.0"
+  },
+  "type": "module"
+}
