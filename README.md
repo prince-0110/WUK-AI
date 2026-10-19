@@ -24,7 +24,7 @@ Connect the phone and computer to the same Wi-Fi, open Expo Go that supports SDK
 
 ## Connect Gemini
 
-Open **Settings → AI connection**, enter the backend's `API_ACCESS_TOKEN`, and use **Test connection**. The app checks `/health` and then the authenticated `/api/status`. The token stays in memory for that app session; it is not saved to local storage. The Gemini API key remains in the Render backend environment. Do not paste either secret into source code or this repository.
+Set a strong `API_ACCESS_TOKEN` in the backend host's environment variables (for Render: **Dashboard → WUK AI service → Environment**). Use the exact same value in **WUK AI → Settings → AI connection → Backend access token**, then tap **Test connection** and **Save connection**. Generate a random token locally with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`; paste that value directly into Render's `API_ACCESS_TOKEN` and the app's token field. Do not use the Gemini key here. The app keeps this access token in memory for the current session and does not save it to local storage. Keep `GEMINI_API_KEY` only in the backend host's environment; never put either secret in mobile source, Expo `EXPO_PUBLIC_` variables, or this repository.
 
 Chat calls the verified `POST /api/chat` route with `{ messages: [{ role, content }] }`. It includes at most the last 16 messages. Render can sleep on its free tier, so the app shows a waking state and allows up to 70 seconds for a chat response. Health success means the backend is reachable; it does not by itself verify Gemini.
 
@@ -48,4 +48,4 @@ npx eas-cli@latest build --profile development --platform android
 
 Chats and notes stay on-device. Messages are not uploaded automatically; the app sends the current message and a bounded transcript only when you request an online answer. You can inspect the approximate saved JSON size, delete individual conversations or notes, clear all conversation history, and clear temporary cache entries. No audio recording files are stored.
 
-Settings lets you switch between the WUK Frost and Pale Mist backgrounds while retaining the Wuk72 blue palette. Matrix Rain is optional and off by default. When enabled, it pauses while the app is inactive or reduced motion is enabled. Speech recognition and Gemini require their respective device/backend services; local notes and date/time commands remain available without them.
+Settings lets you switch between the WUK Frost and Pale Mist backgrounds while retaining the Wuk72 blue palette. Matrix Rain is optional and off by default; turn it on in Settings. It pauses while the app is inactive or reduced motion is enabled. Main navigation is in the header menu so the chat screen has no persistent bottom tab strip. Speech recognition and Gemini require their respective device/backend services; local notes and date/time commands remain available without them.

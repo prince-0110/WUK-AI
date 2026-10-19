@@ -77,6 +77,7 @@ export default function App() {
   const [voiceListening, setVoiceListening] = useState(false);
   const voiceAvailable = Boolean(speechRecognition);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [navigationOpen, setNavigationOpen] = useState(false);
   const activeIdRef = useRef(null);
   const requestRef = useRef(null);
   const scrollRef = useRef(null);
@@ -195,7 +196,7 @@ export default function App() {
       addAssistant(id, reply);
       setConnection('online');
       setConnectionMessage('WUK AI and Gemini are responding');
-      if (autoSpeak) speak({ id: `reply-${Date.now()}`, text: reply });
+      if (autoSpeak) speak({ id: `reply-${newId()}`, text: reply });
     } catch (error) {
       if (!isMounted.current) return;
       updateDelivery(id, userMessageId, 'failed');
@@ -229,7 +230,7 @@ export default function App() {
     if (local?.reply) {
       updateDelivery(id, userMessage.id, 'sent');
       addAssistant(id, local.reply);
-      if (autoSpeak) speak({ id: `reply-${Date.now()}`, text: local.reply });
+      if (autoSpeak) speak({ id: `reply-${newId()}`, text: local.reply });
       return;
     }
     if (!accessToken.trim()) {
@@ -352,10 +353,7 @@ export default function App() {
     ]);
   }
 
-  const statusText = busy ? 'WAKING UP WUK AI…' : connection === 'online' ? 'GEMINI CONNECTED' : connection === 'reachable' ? (accessToken ? 'SERVICE REACHABLE' : 'SERVICE UP · AI NOT LINKED') : connection === 'checking' ? 'CHECKING SERVICE' : connection === 'offline' ? 'OFFLINE' : connection === 'unavailable' ? 'SERVICE UNAVAILABLE' : 'LOCAL MODE';
-  const statusColor = connection === 'online' ? c.success : connection === 'offline' || connection === 'unavailable' ? c.error : c.deepBlue;
   const pageBackground = themeMode === 'mist' ? c.paleMist : c.background;
-  const raisedSurface = themeMode === 'mist' ? c.background : c.paleMist;
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: pageBackground }]}>
@@ -368,15 +366,9 @@ export default function App() {
             <View style={{ flexShrink: 1 }}><Text style={styles.brand}>WUK AI</Text><Text style={styles.subtitle}>BY WUK72 · PERSONAL ASSISTANT</Text></View>
           </View>
           <View style={styles.headerActions}>
-            <Action label="＋" quiet accessibilityLabel="New conversation" onPress={newChat} />
+            <Action label="☰" quiet accessibilityLabel="Open navigation menu" onPress={() => setNavigationOpen(true)} />
             <Action label="SETTINGS" quiet onPress={() => { setDraftUrl(backendUrl); setDraftToken(accessToken); setSettingsOpen(true); }} />
           </View>
-        </View>
-
-        <View style={[styles.connectionBar, { backgroundColor: raisedSurface }]}>
-          <View style={[styles.statusDot, { backgroundColor: busy ? c.warning : statusColor }]} />
-          <Text numberOfLines={1} style={styles.statusText}>{statusText}</Text>
-          <Text numberOfLines={1} style={styles.statusDetail}>{connection === 'online' ? 'ONLINE' : connection === 'checking' ? 'WAIT' : 'LOCAL READY'}</Text>
         </View>
 
         {screen === 'chat' ? <>
@@ -431,12 +423,19 @@ export default function App() {
           <Text style={styles.smallHint}>{voiceAvailable ? 'Speech recognition module available.' : 'Speech-to-text requires a WUK AI development build. Expo Go supports the rest of the app.'} Text-to-speech works with Expo Go.</Text>
         </ScrollView>}
 
-        <View style={[styles.bottomTabs, { backgroundColor: raisedSurface }]}>
-          {[
-            ['chat', 'CHAT', '⌂'], ['history', 'CHATS', '▤'], ['notes', 'NOTES', '◇'], ['settings', 'SETTINGS', '⚙'],
-          ].map(([key, label, icon]) => <Pressable key={key} accessibilityRole="tab" accessibilityState={{ selected: screen === key }} onPress={() => setScreen(key)} style={[styles.bottomTab, screen === key && styles.bottomTabActive]}><Text style={[styles.tabIcon, screen === key && styles.tabIconActive]}>{icon}</Text><Text style={[styles.tabLabel, screen === key && styles.tabLabelActive]}>{label}</Text></Pressable>)}
-        </View>
       </KeyboardAvoidingView>
+
+      <Modal visible={navigationOpen} transparent animationType="fade" onRequestClose={() => setNavigationOpen(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setNavigationOpen(false)}>
+          <View style={styles.navigationMenu}>
+            <Text style={styles.pageEyebrow}>WUK AI · NAVIGATION</Text>
+            {[
+              ['chat', 'Chat'], ['history', 'Conversations'], ['notes', 'Notes'], ['settings', 'Settings'],
+            ].map(([key, label]) => <Pressable key={key} accessibilityRole="button" onPress={() => { setScreen(key); setNavigationOpen(false); }} style={styles.navigationItem}><Text style={styles.navigationItemText}>{label}</Text><Text style={styles.settingChevron}>›</Text></Pressable>)}
+            <View style={styles.modalActions}><Action label="＋ NEW CHAT" onPress={() => { setNavigationOpen(false); newChat(); }} /><Action label="CLOSE" quiet onPress={() => setNavigationOpen(false)} /></View>
+          </View>
+        </Pressable>
+      </Modal>
 
       <Modal visible={settingsOpen} transparent animationType="fade" onRequestClose={() => setSettingsOpen(false)}>
         <View style={styles.modalBackdrop}><ScrollView contentContainerStyle={styles.modalScroll} keyboardShouldPersistTaps="handled"><View style={styles.settingsModal}>
@@ -465,11 +464,10 @@ const styles = StyleSheet.create({
   header: { minHeight: 70, paddingHorizontal: s.lg, paddingTop: s.sm, paddingBottom: s.sm, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: c.border, backgroundColor: c.background },
   brandRow: { flexDirection: 'row', alignItems: 'center', gap: 10 }, logo: { width: 42, height: 42, borderRadius: 13, backgroundColor: c.deepBlue, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.accent }, logoText: { color: c.paleMist, fontSize: 26, fontWeight: '800', letterSpacing: -2 }, brand: { color: c.primaryText, fontSize: 20, fontWeight: '800', letterSpacing: 1.5 }, subtitle: { color: c.secondaryText, fontSize: 8, letterSpacing: 0.9, marginTop: 3 }, headerActions: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   action: { minHeight: 44, paddingHorizontal: 13, borderRadius: 14, backgroundColor: c.deepBlue, alignItems: 'center', justifyContent: 'center' }, actionQuiet: { backgroundColor: c.paleMist, borderWidth: 1, borderColor: c.border }, actionText: { color: c.white, fontSize: 11, fontWeight: '800', letterSpacing: 0.4 }, actionQuietText: { color: c.deepBlue }, disabled: { opacity: 0.45 }, pressed: { opacity: 0.78 },
-  connectionBar: { minHeight: 38, paddingHorizontal: s.lg, flexDirection: 'row', alignItems: 'center', gap: 8, borderBottomWidth: 1, borderBottomColor: c.border, backgroundColor: c.surface }, statusDot: { width: 8, height: 8, borderRadius: 4 }, statusText: { flex: 1, color: c.primaryText, fontSize: 10, fontWeight: '800', letterSpacing: 0.6 }, statusDetail: { color: c.secondaryText, fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
   content: { flex: 1, backgroundColor: 'transparent' }, chatContent: { padding: s.lg, paddingBottom: 20, gap: 12, flexGrow: 1 }, welcomeCard: { flex: 1, minHeight: 360, alignItems: 'center', justifyContent: 'center', paddingVertical: 26, gap: 12 }, welcomeMark: { width: 62, height: 62, borderRadius: 21, backgroundColor: c.deepBlue, alignItems: 'center', justifyContent: 'center', shadowColor: c.deepBlue, shadowOpacity: 0.18, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 4 }, welcomeMarkText: { fontSize: 35, fontWeight: '800', color: c.paleMist }, welcomeTitle: { color: c.primaryText, fontSize: 24, fontWeight: '700', textAlign: 'center', letterSpacing: -0.4 }, welcomeCopy: { maxWidth: 310, color: c.secondaryText, fontSize: 13, lineHeight: 19, textAlign: 'center' }, promptGrid: { width: '100%', maxWidth: 500, flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 12 }, promptCard: { width: '48%', minHeight: 72, flexGrow: 1, padding: 12, backgroundColor: c.paleMist, borderWidth: 1, borderColor: c.border, borderRadius: 15, justifyContent: 'space-between' }, promptText: { color: c.primaryText, fontSize: 12, lineHeight: 17, fontWeight: '600' }, promptArrow: { color: c.accent, fontSize: 14, alignSelf: 'flex-end' },
   message: { width: '100%', maxWidth: 620, borderRadius: 18, padding: 14, borderWidth: 1, gap: 8 }, userMessage: { alignSelf: 'flex-end', backgroundColor: c.deepBlue, borderColor: c.deepBlue, maxWidth: '92%' }, assistantMessage: { alignSelf: 'flex-start', backgroundColor: c.paleMist, borderColor: c.border, maxWidth: '96%' }, messageHeader: { flexDirection: 'row', alignItems: 'center', gap: 7 }, speakerMark: { width: 22, height: 22, borderRadius: 8, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' }, speakerMarkText: { fontSize: 11, fontWeight: '800', color: c.deepBlue }, messageRole: { color: c.deepBlue, fontSize: 10, fontWeight: '800', letterSpacing: 0.8 }, userMessageRole: { color: c.paleMist }, messageTime: { marginLeft: 'auto', color: c.secondaryText, fontSize: 10 }, userMessageTime: { color: c.paleMist }, messageText: { color: c.white, fontSize: 14, lineHeight: 21 }, messageTools: { flexDirection: 'row', gap: 7, marginTop: 4 }, toolButton: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 10, backgroundColor: c.surface, borderRadius: 10 }, toolText: { color: c.deepBlue, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 }, deliveryRow: { minHeight: 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, failedText: { color: c.error, fontSize: 10, fontWeight: '800', letterSpacing: 0.6 }, retryButton: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 10, borderWidth: 1, borderColor: c.error, borderRadius: 10 }, retryText: { color: c.error, fontWeight: '800', fontSize: 10 }, typing: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 13, backgroundColor: c.paleMist, borderRadius: 14, alignSelf: 'flex-start' }, typingText: { color: c.secondaryText, fontSize: 12 },
   banner: { marginHorizontal: 12, marginBottom: 6, paddingHorizontal: 12, paddingVertical: 9, minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#F7E8E9', borderRadius: 12, borderWidth: 1, borderColor: '#E8C4C8' }, successBanner: { backgroundColor: '#E5F3ED', borderColor: '#C4E1D5' }, bannerText: { flex: 1, color: c.primaryText, fontSize: 11, lineHeight: 16 }, bannerClose: { color: c.secondaryText, fontSize: 20, paddingHorizontal: 4 }, composerWrap: { paddingHorizontal: 10, paddingTop: 8, paddingBottom: 7, borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.background }, composer: { minHeight: 54, flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 5, backgroundColor: c.paleMist, borderWidth: 1, borderColor: c.border, borderRadius: 20 }, input: { flex: 1, minHeight: 42, maxHeight: 112, color: c.primaryText, paddingHorizontal: 7, paddingTop: 11, paddingBottom: 8, fontSize: 14, lineHeight: 20 }, voiceButton: { width: 42, height: 42, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface }, voiceActive: { backgroundColor: '#F7E8E9' }, voiceText: { color: c.deepBlue, fontSize: 10, fontWeight: '800' }, voiceTextActive: { color: c.error }, sendButton: { width: 42, height: 42, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: c.deepBlue }, sendText: { color: c.white, fontSize: 25, lineHeight: 28, fontWeight: '600' }, stopButton: { height: 42, paddingHorizontal: 12, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F7E8E9' }, stopText: { color: c.error, fontSize: 10, fontWeight: '800' }, composerHint: { color: c.secondaryText, textAlign: 'center', fontSize: 8, letterSpacing: 0.45, paddingTop: 7 },
-  bottomTabs: { minHeight: 60, flexDirection: 'row', alignItems: 'stretch', backgroundColor: c.paleMist, borderTopWidth: 1, borderTopColor: c.border, paddingBottom: Platform.OS === 'android' ? 2 : 0 }, bottomTab: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2, borderTopWidth: 2, borderTopColor: 'transparent' }, bottomTabActive: { borderTopColor: c.accent }, tabIcon: { color: c.secondaryText, fontSize: 16 }, tabIconActive: { color: c.deepBlue }, tabLabel: { color: c.secondaryText, fontSize: 8, fontWeight: '700', letterSpacing: 0.5 }, tabLabelActive: { color: c.deepBlue },
+  navigationMenu: { alignSelf: 'stretch', marginTop: 'auto', padding: 18, gap: 8, backgroundColor: c.paleMist, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, borderColor: c.border }, navigationItem: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: c.border }, navigationItemText: { color: c.primaryText, fontSize: 14, fontWeight: '700' },
   pageContent: { padding: s.lg, gap: 13, paddingBottom: 28 }, pageHeadingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, pageEyebrow: { color: c.deepBlue, fontSize: 10, fontWeight: '800', letterSpacing: 1.1 }, pageTitle: { color: c.primaryText, fontSize: 27, fontWeight: '700', letterSpacing: -0.5, marginTop: 3 }, pageDescription: { color: c.secondaryText, fontSize: 13, lineHeight: 19, marginBottom: 4 }, emptyCard: { backgroundColor: c.paleMist, padding: 18, borderRadius: 16, borderWidth: 1, borderColor: c.border }, emptyCopy: { color: c.secondaryText, fontSize: 13, lineHeight: 19 }, conversationCard: { minHeight: 84, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.paleMist, borderRadius: 16, borderWidth: 1, borderColor: c.border }, currentConversation: { borderColor: c.accent }, conversationIcon: { width: 38, height: 38, borderRadius: 14, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' }, conversationIconText: { color: c.deepBlue, fontWeight: '800', fontSize: 18 }, conversationInfo: { flex: 1, gap: 3 }, conversationTitle: { color: c.primaryText, fontSize: 13, fontWeight: '700' }, conversationSummary: { color: c.secondaryText, fontSize: 11 }, conversationMeta: { color: c.secondaryText, fontSize: 9 }, deleteConversation: { minWidth: 35, minHeight: 40, alignItems: 'center', justifyContent: 'center' }, deleteConversationText: { color: c.error, fontSize: 24 }, noteCard: { backgroundColor: c.paleMist, borderWidth: 1, borderColor: c.border, borderRadius: 16, padding: 15, gap: 12 }, noteText: { color: c.primaryText, fontSize: 14, lineHeight: 21 }, noteFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, noteDate: { color: c.secondaryText, fontSize: 10 }, noteDelete: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 8 }, noteDeleteText: { color: c.error, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
   settingCard: { minHeight: 74, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: c.border, borderRadius: 16, backgroundColor: c.paleMist }, settingTitle: { color: c.primaryText, fontSize: 13, fontWeight: '700' }, settingDescription: { color: c.secondaryText, fontSize: 11, lineHeight: 16, marginTop: 3 }, settingUrl: { color: c.deepBlue, fontSize: 10, marginTop: 5 }, settingChevron: { color: c.deepBlue, fontSize: 26 }, switchTrack: { width: 48, height: 28, borderRadius: 16, padding: 3, justifyContent: 'center', backgroundColor: c.border }, switchTrackOn: { backgroundColor: c.deepBlue }, switchThumb: { width: 22, height: 22, borderRadius: 11, backgroundColor: c.white }, switchThumbOn: { alignSelf: 'flex-end' }, sectionCard: { padding: 14, borderWidth: 1, borderColor: c.border, borderRadius: 16, backgroundColor: c.paleMist }, cardEyebrow: { color: c.deepBlue, fontSize: 9, fontWeight: '800', letterSpacing: 1, marginBottom: 4 }, dataRow: { minHeight: 40, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: c.border }, dataLabel: { color: c.secondaryText, fontSize: 11 }, dataValue: { color: c.primaryText, fontSize: 12, fontWeight: '700' }, dataFootnote: { color: c.secondaryText, fontSize: 10, lineHeight: 15, marginTop: 10 }, aboutCard: { gap: 5, padding: 14, backgroundColor: c.surface, borderRadius: 16 }, aboutTitle: { color: c.primaryText, fontSize: 16, fontWeight: '800' }, aboutBrand: { color: c.deepBlue, fontSize: 13 }, smallHint: { color: c.secondaryText, fontSize: 10, lineHeight: 15, paddingHorizontal: 3 },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(36,59,80,0.35)', justifyContent: 'center', padding: 14 }, modalScroll: { flexGrow: 1, justifyContent: 'center' }, settingsModal: { padding: 19, backgroundColor: c.paleMist, borderRadius: 22, borderWidth: 1, borderColor: c.border, gap: 11 }, modalTitle: { color: c.primaryText, fontSize: 23, fontWeight: '750' }, modalDescription: { color: c.secondaryText, fontSize: 12, lineHeight: 18 }, fieldLabel: { color: c.deepBlue, fontSize: 9, fontWeight: '800', letterSpacing: 0.8, marginTop: 3 }, fieldInput: { minHeight: 48, paddingHorizontal: 12, borderWidth: 1, borderColor: c.border, borderRadius: 12, backgroundColor: c.white, color: c.primaryText, fontSize: 13 }, fieldHint: { color: c.secondaryText, fontSize: 10, lineHeight: 15 }, modalActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8, marginTop: 3 }, checkingRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },

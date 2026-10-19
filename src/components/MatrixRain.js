@@ -1,15 +1,18 @@
-import React, { useEffect, useState } from 'react';
-import { AccessibilityInfo, Animated, AppState, Dimensions, View } from 'react-native';
-import { colors } from '../theme';
+import React, { useEffect, useMemo, useState } from 'react';
+import { AccessibilityInfo, Animated, AppState, Easing, useWindowDimensions, View } from 'react-native';
 
 const GLYPHS = '01WUK72アイウエオカキクケコ';
+const RAIN_GREEN = '#27856B';
 
 export default function MatrixRain({ enabled }) {
   const [active, setActive] = useState(AppState.currentState === 'active');
   const [reducedMotion, setReducedMotion] = useState(false);
-  const { width, height } = Dimensions.get('window');
+  const { width, height } = useWindowDimensions();
   const columns = Math.min(14, Math.max(8, Math.ceil(width / 34)));
-  const [values] = useState(() => Array.from({ length: columns }, () => new Animated.Value(-height)));
+  const values = useMemo(() => Array.from({ length: columns }, (_, index) => {
+    const startOffset = (index * 0.61803398875) % 1;
+    return new Animated.Value(startOffset * height - height * 0.2);
+  }), [columns, height]);
 
   useEffect(() => {
     const appState = AppState.addEventListener('change', state => setActive(state === 'active'));
@@ -24,10 +27,10 @@ export default function MatrixRain({ enabled }) {
       return undefined;
     }
     const animations = values.map((value, index) => {
-      const duration = 6500 + (index % 5) * 950;
+      const duration = 7500 + (index % 5) * 850;
       const loop = Animated.loop(Animated.sequence([
-        Animated.timing(value, { toValue: height + 100, duration, useNativeDriver: true }),
-        Animated.timing(value, { toValue: -height - 100, duration: 0, useNativeDriver: true }),
+        Animated.timing(value, { toValue: height + 150, duration, easing: Easing.linear, useNativeDriver: true }),
+        Animated.timing(value, { toValue: -height * 0.2, duration: 1, useNativeDriver: true }),
       ]));
       loop.start();
       return loop;
@@ -36,9 +39,9 @@ export default function MatrixRain({ enabled }) {
   }, [enabled, active, reducedMotion, height, values]);
 
   if (!enabled || reducedMotion) return null;
-  return <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, overflow: 'hidden', opacity: 0.12 }}>
-    {values.map((value, index) => <Animated.Text key={index} numberOfLines={8} style={{ position: 'absolute', left: 8 + index * (width / columns), top: 0, transform: [{ translateY: value }], color: colors.deepBlue, fontSize: 10, lineHeight: 17, fontFamily: 'monospace' }}>
-      {Array.from({ length: 8 }, (_, row) => GLYPHS[(index * 7 + row * 3) % GLYPHS.length]).join('\n')}
+  return <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, overflow: 'hidden', zIndex: 0 }}>
+    {values.map((value, index) => <Animated.Text key={index} numberOfLines={10} style={{ position: 'absolute', left: 8 + index * (width / columns), top: 0, transform: [{ translateY: value }], color: RAIN_GREEN, opacity: 0.42, fontSize: 11, lineHeight: 19, fontFamily: 'monospace', fontWeight: '700' }}>
+      {Array.from({ length: 10 }, (_, row) => GLYPHS[(index * 7 + row * 3) % GLYPHS.length]).join('\n')}
     </Animated.Text>)}
   </View>;
 }
