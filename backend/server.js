@@ -10,6 +10,7 @@ const app = express();
 const port = Number(process.env.PORT || 8787);
 const accessToken = process.env.API_ACCESS_TOKEN || '';
 const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+const imageModel = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
 const apiKey = process.env.GEMINI_API_KEY || '';
 
 if (accessToken.length < 32 || /replace|placeholder|change.?me/i.test(accessToken)) {
@@ -21,7 +22,7 @@ const hasApiKey = Boolean(apiKey && !/replace|placeholder|change.?me/i.test(apiK
 const gemini = hasApiKey ? new GoogleGenAI({ apiKey }) : null;
 app.disable('x-powered-by');
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'same-site' } }));
-app.use(express.json({ limit: '64kb', strict: true }));
+app.use(express.json({ limit: '6mb', strict: true }));
 
 function authorized(req, res, next) {
   const header = req.get('authorization') || '';
@@ -44,8 +45,24 @@ const chatLimit = rateLimit({
   message: { error: 'Too many requests. Wait a few minutes and try again.' }
 });
 
+const imageLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 4,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Image generation limit reached. Wait 15 minutes and try again.' }
+});
+
+const visionLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 12,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Image question limit reached. Wait 15 minutes and try again.' }
+});
+
 app.get('/api/status', authorized, (_req, res) => {
-  res.json({ ready: Boolean(gemini), model: gemini ? model : null });
+  res.json({ ready: Boolean(gemini), model: gemini ? model : null, imageModel: gemini ? imageModel : null });
 });
 
 app.post('/api/chat', authorized, chatLimit, async (req, res) => {
@@ -82,6 +99,60 @@ app.post('/api/chat', authorized, chatLimit, async (req, res) => {
     // Do not return provider error bodies, request details, or credentials to the mobile app.
     console.error(`Gemini request failed${Number.isInteger(status) ? ` (HTTP ${status})` : ''}.`);
     return res.status(502).json({ error: 'Gemini could not complete this request. Check backend logs and try again.' });
+  }
+});
+
+app.post('/api/vision', authorized, visionLimit, async (req, res) => {
+  if (!gemini) return res.status(503).json({ error: 'The backend has no Gemini API key configured.' });
+  const { prompt, image, mimeType } = req.body || {};
+  if (typeof prompt !== 'string' || prompt.length > 1500) return res.status(400).json({ error: 'Add an image question up to 1,500 characters.' });
+  if (typeof image !== 'string' || image.length < 100 || image.length > 4_800_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(image)) {
+    return res.status(400).json({ error: 'Image data is missing, invalid, or too large.' });
+  }
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) return res.status(400).json({ error: 'Use a JPEG, PNG, or WebP image.' });
+
+  try {
+    const interaction = await gemini.interactions.create({
+      model,
+      input: [
+        { type: 'text', text: prompt.trim() || 'Describe this image and answer what you can see.' },
+        { type: 'image', data: image, mime_type: mimeType }
+      ],
+      system_instruction: 'You are WUK AI by Wuk72. Describe only what is visible, be clear when uncertain, and do not claim to identify people.',
+      store: false
+    });
+    const reply = interaction.output_text?.trim();
+    if (!reply) return res.status(502).json({ error: 'Gemini returned no image answer. Try again.' });
+    return res.json({ reply });
+  } catch (error) {
+    const status = Number(error?.status);
+    console.error(`Gemini image question failed${Number.isInteger(status) ? ` (HTTP ${status})` : ''}.`);
+    return res.status(502).json({ error: 'Gemini could not answer about this image. Try again.' });
+  }
+});
+
+app.post('/api/image', authorized, imageLimit, async (req, res) => {
+  if (!gemini) return res.status(503).json({ error: 'The backend has no Gemini API key configured.' });
+  const prompt = req.body?.prompt;
+  if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 1000) {
+    return res.status(400).json({ error: 'Describe the image you want to generate (up to 1,000 characters).' });
+  }
+
+  try {
+    const interaction = await gemini.interactions.create({
+      model: imageModel,
+      input: prompt.trim(),
+      response_format: { type: 'image', mime_type: 'image/jpeg', aspect_ratio: '1:1', image_size: '1K' },
+      store: false
+    });
+    const output = interaction.output_image;
+    if (!output?.data) return res.status(502).json({ error: 'Gemini did not return an image. Try a different prompt.' });
+    const mimeType = ['image/jpeg', 'image/png', 'image/webp'].includes(output.mime_type) ? output.mime_type : 'image/jpeg';
+    return res.json({ reply: interaction.output_text?.trim() || 'Here is the image Gemini generated.', image: { mimeType, data: output.data } });
+  } catch (error) {
+    const status = Number(error?.status);
+    console.error(`Gemini image generation failed${Number.isInteger(status) ? ` (HTTP ${status})` : ''}.`);
+    return res.status(502).json({ error: 'Gemini could not generate this image. Check image-model access and try again.' });
   }
 });
 

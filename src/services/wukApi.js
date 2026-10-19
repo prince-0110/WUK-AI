@@ -1,6 +1,7 @@
 export const DEFAULT_API_URL = (process.env.EXPO_PUBLIC_API_URL || 'https://wuk-ai.onrender.com').replace(/\/+$/, '');
 const CHAT_TIMEOUT_MS = 70000;
 const HEALTH_TIMEOUT_MS = 65000;
+const IMAGE_TIMEOUT_MS = 90000;
 
 async function requestJson(url, options = {}, timeoutMs = HEALTH_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -15,7 +16,10 @@ async function requestJson(url, options = {}, timeoutMs = HEALTH_TIMEOUT_MS) {
     let data = {};
     if (raw) {
       try { data = JSON.parse(raw); }
-      catch { throw new Error(`The server returned an invalid response (HTTP ${response.status}).`); }
+      catch {
+        if (response.status === 404) throw new Error('This WUK AI server does not support this feature yet. Deploy the updated backend and try again.');
+        throw new Error(`The server returned an invalid response (HTTP ${response.status}).`);
+      }
     }
     if (!response.ok) {
       const error = new Error(typeof data.error === 'string' ? data.error : `The server returned HTTP ${response.status}.`);
@@ -74,4 +78,31 @@ export async function sendToBackend(baseUrl, token, messages, signal) {
   }, CHAT_TIMEOUT_MS);
   if (typeof response.reply !== 'string' || !response.reply.trim()) throw new Error('The backend returned an empty answer. Try again.');
   return response.reply.trim();
+}
+
+export async function askAboutImage(baseUrl, token, prompt, imageBase64, mimeType, signal) {
+  const base = (baseUrl || DEFAULT_API_URL).trim().replace(/\/+$/, '');
+  if (!token?.trim()) throw new Error('Add your backend access token in Settings before sending AI messages.');
+  if (typeof imageBase64 !== 'string' || !imageBase64 || imageBase64.length > 4_800_000) throw new Error('This image is too large to send. Choose a smaller photo.');
+  const response = await requestJson(`${base}/api/vision`, {
+    method: 'POST', headers: authHeaders(token),
+    body: JSON.stringify({ prompt: prompt.trim().slice(0, 1500) || 'Describe this image and answer what you can see.', image: imageBase64, mimeType }), signal,
+  }, IMAGE_TIMEOUT_MS);
+  if (typeof response.reply !== 'string' || !response.reply.trim()) throw new Error('Gemini returned no answer about the image. Try again.');
+  return response.reply.trim();
+}
+
+export async function generateImage(baseUrl, token, prompt, signal) {
+  const base = (baseUrl || DEFAULT_API_URL).trim().replace(/\/+$/, '');
+  if (!token?.trim()) throw new Error('Add your backend access token in Settings before generating an image.');
+  if (!prompt?.trim()) throw new Error('Describe the image you want to create.');
+  const response = await requestJson(`${base}/api/image`, {
+    method: 'POST', headers: authHeaders(token),
+    body: JSON.stringify({ prompt: prompt.trim().slice(0, 1000) }), signal,
+  }, IMAGE_TIMEOUT_MS);
+  const image = response.image;
+  if (typeof image?.data !== 'string' || !image.data || !/^image\/(jpeg|png|webp)$/.test(image.mimeType || '')) {
+    throw new Error('Gemini did not return a displayable image. Try a different prompt.');
+  }
+  return { reply: typeof response.reply === 'string' && response.reply.trim() ? response.reply.trim() : 'Here is the image Gemini generated.', image };
 }

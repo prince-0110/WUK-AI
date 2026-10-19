@@ -33,6 +33,13 @@
         }
       ],
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "WUK AI accesses a photo only when you choose to ask about it.",
+          "microphonePermission": false
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "android": {

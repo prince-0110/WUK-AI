@@ -1,13 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, AppState, KeyboardAvoidingView, Linking,
+  ActivityIndicator, Alert, AppState, Image, KeyboardAvoidingView, Linking,
   Modal, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet,
   Text, TextInput, View,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Speech from 'expo-speech';
 import * as Clipboard from 'expo-clipboard';
-import { checkBackend, DEFAULT_API_URL, sendToBackend } from './src/services/wukApi';
+import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
+import { askAboutImage, checkBackend, DEFAULT_API_URL, generateImage, sendToBackend } from './src/services/wukApi';
 import MarkdownMessage from './src/components/MarkdownMessage';
 import MatrixRain from './src/components/MatrixRain';
 import { colors as c, spacing as s } from './src/theme';
@@ -17,6 +19,8 @@ const LEGACY_STORAGE_KEY = '@wuk72_wuk_ai_chat_v1';
 const OLDER_STORAGE_KEY = '@wuk72_jarvis_chat_v1';
 const PAGE_SIZE = 40;
 const TEMP_CACHE_PREFIX = '@wuk72_cache_';
+const IMAGE_CACHE_DIR = FileSystem.cacheDirectory ? `${FileSystem.cacheDirectory}wuk-ai-chat-images/` : null;
+const MAX_IMAGE_BASE64_LENGTH = 4_800_000;
 const newId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const welcomeMessage = () => ({
   id: newId(), role: 'assistant', time: new Date().toISOString(),
@@ -40,6 +44,20 @@ const localCommand = raw => {
 let speechRecognition = null;
 try { speechRecognition = require('expo-speech-recognition').ExpoSpeechRecognitionModule; } catch { /* use a development build for voice input */ }
 
+async function writeChatImage(base64, id, mimeType = 'image/jpeg') {
+  if (!IMAGE_CACHE_DIR) throw new Error('Image storage is unavailable on this device.');
+  const directory = await FileSystem.getInfoAsync(IMAGE_CACHE_DIR);
+  if (!directory.exists) await FileSystem.makeDirectoryAsync(IMAGE_CACHE_DIR, { intermediates: true });
+  const extension = mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
+  const uri = `${IMAGE_CACHE_DIR}${id}.${extension}`;
+  await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
+  return uri;
+}
+
+async function readChatImage(uri) {
+  return FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+}
+
 function formatTime(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -57,6 +75,8 @@ export default function App() {
   const [hydrated, setHydrated] = useState(false);
   const [notes, setNotes] = useState([]);
   const [input, setInput] = useState('');
+  const [pendingImage, setPendingImage] = useState(null);
+  const [imageGenerationMode, setImageGenerationMode] = useState(false);
   const [screen, setScreen] = useState('chat');
   const [backendUrl, setBackendUrl] = useState(DEFAULT_API_URL);
   const [draftUrl, setDraftUrl] = useState(DEFAULT_API_URL);
@@ -122,7 +142,10 @@ export default function App() {
     AsyncStorage.setItem(STORAGE_KEY, payload).then(async () => {
       setStorageBytes(utf8ByteLength(payload));
       const keys = await AsyncStorage.getAllKeys();
-      setTempCacheCount(keys.filter(key => key.startsWith(TEMP_CACHE_PREFIX)).length);
+      const temporaryKeys = keys.filter(key => key.startsWith(TEMP_CACHE_PREFIX)).length;
+      const imageDirectory = IMAGE_CACHE_DIR ? await FileSystem.getInfoAsync(IMAGE_CACHE_DIR) : { exists: false };
+      const imageCount = imageDirectory.exists ? (await FileSystem.readDirectoryAsync(IMAGE_CACHE_DIR)).length : 0;
+      setTempCacheCount(temporaryKeys + imageCount);
     }).catch(() => setBanner('Could not save the latest change to local storage.'));
   }, [conversations, activeId, activeConversation?.id, notes, backendUrl, autoSpeak, matrixEnabled, themeMode, hydrated]);
 
@@ -176,11 +199,11 @@ export default function App() {
 
   const updateDelivery = useCallback((id, messageId, delivery) => updateConversation(id, list => list.map(message => message.id === messageId ? { ...message, delivery } : message)), [updateConversation]);
 
-  function addAssistant(id, text) {
-    updateConversation(id, list => [...list, { id: newId(), role: 'assistant', text, time: new Date().toISOString() }]);
+  function addAssistant(id, text, imageUri = null) {
+    updateConversation(id, list => [...list, { id: newId(), role: 'assistant', text, time: new Date().toISOString(), ...(imageUri ? { imageUri } : {}) }]);
   }
 
-  async function startRequest(id, transcript, userMessageId) {
+  async function startRequest(id, transcript, userMessageId, media = {}) {
     setBusy(true);
     setBanner('');
     setConnection('checking');
@@ -190,10 +213,26 @@ export default function App() {
     const userIndex = transcript.findIndex(message => message.id === userMessageId);
     const context = transcript.slice(0, userIndex + 1);
     try {
-      const reply = await sendToBackend(backendUrl, accessToken, context, controller.signal);
+      let reply;
+      if (media.generateImage) {
+        const result = await generateImage(backendUrl, accessToken, context.at(-1)?.text, controller.signal);
+        const imageUri = await writeChatImage(result.image.data, newId(), result.image.mimeType);
+        reply = result.reply;
+        if (!isMounted.current) return;
+        updateDelivery(id, userMessageId, 'sent');
+        addAssistant(id, reply, imageUri);
+      } else if (media.imageBase64) {
+        reply = await askAboutImage(backendUrl, accessToken, context.at(-1)?.text || 'Describe this image.', media.imageBase64, media.mimeType || 'image/jpeg', controller.signal);
+        if (!isMounted.current) return;
+        updateDelivery(id, userMessageId, 'sent');
+        addAssistant(id, reply);
+      } else {
+        reply = await sendToBackend(backendUrl, accessToken, context, controller.signal);
+        if (!isMounted.current) return;
+        updateDelivery(id, userMessageId, 'sent');
+        addAssistant(id, reply);
+      }
       if (!isMounted.current) return;
-      updateDelivery(id, userMessageId, 'sent');
-      addAssistant(id, reply);
       setConnection('online');
       setConnectionMessage('WUK AI and Gemini are responding');
       if (autoSpeak) speak({ id: `reply-${newId()}`, text: reply });
@@ -209,16 +248,39 @@ export default function App() {
     }
   }
 
+  async function chooseImage() {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7, base64: true, allowsEditing: false });
+      if (result.canceled) return;
+      const asset = result.assets?.[0];
+      if (!asset?.base64) { setBanner('Could not read that photo. Choose another image and try again.'); return; }
+      if (asset.base64.length > MAX_IMAGE_BASE64_LENGTH) { Alert.alert('Photo is too large', 'Choose a smaller or compressed image. WUK AI limits photo uploads to about 3.5 MB.'); return; }
+      setPendingImage({ uri: asset.uri, base64: asset.base64, mimeType: 'image/jpeg' });
+      setImageGenerationMode(false);
+      setBanner('Photo selected. It is sent to Gemini only when you send your question.');
+    } catch {
+      setBanner('Could not open your photos. Try again or check Android permissions.');
+    }
+  }
+
   async function sendMessage() {
     const text = input.trim();
-    if (!text || busy || !activeConversation) return;
+    if ((!text && !pendingImage) || busy || !activeConversation) return;
+    if (imageGenerationMode && !text) { setBanner('Describe the image you want to create first.'); return; }
+    let imageUri = null;
+    if (pendingImage) {
+      try { imageUri = await writeChatImage(pendingImage.base64, newId()); }
+      catch { setBanner('Could not keep this photo on your phone. Check free storage and try again.'); return; }
+    }
     const id = activeConversation.id;
     const time = new Date().toISOString();
-    const userMessage = { id: newId(), role: 'user', text, time, delivery: 'pending' };
+    const userMessage = { id: newId(), role: 'user', text: text || 'What is in this image?', time, delivery: 'pending', ...(imageUri ? { imageUri, imageMimeType: 'image/jpeg' } : {}), ...(imageGenerationMode ? { imageGeneration: true } : {}) };
     const nextMessages = [...messages, userMessage];
     setInput('');
+    setPendingImage(null);
+    setImageGenerationMode(false);
     updateConversation(id, nextMessages);
-    const local = localCommand(text);
+    const local = !imageUri && !imageGenerationMode ? localCommand(text) : null;
     if (local?.note !== undefined) {
       updateDelivery(id, userMessage.id, 'sent');
       if (local.note) {
@@ -240,7 +302,11 @@ export default function App() {
       setBanner('This message is saved on your phone but wasn’t sent. Add the backend access token in Settings, then tap Retry.');
       return;
     }
-    await startRequest(id, nextMessages, userMessage.id);
+    await startRequest(id, nextMessages, userMessage.id, {
+      imageBase64: pendingImage?.base64,
+      mimeType: pendingImage?.mimeType,
+      generateImage: imageGenerationMode,
+    });
   }
 
   async function retryMessage(message) {
@@ -251,7 +317,12 @@ export default function App() {
     const id = activeConversation.id;
     const transcript = messages.slice(0, index + 1).map(item => ({ ...item, delivery: item.id === message.id ? 'pending' : item.delivery }));
     updateConversation(id, list => [...list.slice(0, index), { ...list[index], delivery: 'pending' }, ...list.slice(index + 1)]);
-    await startRequest(id, transcript, message.id);
+    let imageBase64;
+    if (message.imageUri && !message.imageGeneration) {
+      try { imageBase64 = await readChatImage(message.imageUri); }
+      catch { setBanner('The cached photo is no longer available on this phone. Attach it again to retry.'); updateDelivery(id, message.id, 'failed'); return; }
+    }
+    await startRequest(id, transcript, message.id, { imageBase64, mimeType: message.imageMimeType || 'image/jpeg', generateImage: message.imageGeneration === true });
   }
 
   function newChat() {
@@ -340,14 +411,22 @@ export default function App() {
 
   function deleteNote(id) { setNotes(previous => previous.filter(note => note.id !== id)); }
   function clearTemporaryCache() {
-    Alert.alert('Clear temporary cache?', 'Notes and conversations will stay on this phone.', [
+    Alert.alert('Clear temporary cache?', 'Notes and conversation text will stay. Cached chat images will be removed from this phone.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Clear cache', style: 'destructive', onPress: async () => {
         try {
           const keys = await AsyncStorage.getAllKeys();
           const cacheKeys = keys.filter(key => key.startsWith(TEMP_CACHE_PREFIX));
           if (cacheKeys.length) await AsyncStorage.multiRemove(cacheKeys);
-          setTempCacheCount(0); Alert.alert('Cache cleared', 'Your notes and conversations were not changed.');
+          if (IMAGE_CACHE_DIR) await FileSystem.deleteAsync(IMAGE_CACHE_DIR, { idempotent: true });
+          setConversations(previous => previous.map(conversation => ({ ...conversation, messages: conversation.messages.map(message => {
+            if (!message.imageUri) return message;
+            const rest = { ...message };
+            delete rest.imageUri;
+            delete rest.imageMimeType;
+            return { ...rest, imageRemoved: true };
+          }) })));
+          setTempCacheCount(0); Alert.alert('Cache cleared', 'Notes and conversation text were kept. Cached chat images were removed.');
         } catch { Alert.alert('Could not clear cache', 'Your notes and conversations were not changed.'); }
       } },
     ]);
@@ -356,7 +435,7 @@ export default function App() {
   const pageBackground = themeMode === 'mist' ? c.paleMist : c.background;
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: pageBackground }]}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: pageBackground, paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0 }]}>
       <StatusBar barStyle="dark-content" backgroundColor={pageBackground} />
       <MatrixRain enabled={matrixEnabled} />
       <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -384,6 +463,7 @@ export default function App() {
             {messages.length > visibleCount && <Action label={`LOAD ${Math.min(PAGE_SIZE, messages.length - visibleCount)} OLDER MESSAGES`} quiet onPress={() => setVisibleCount(count => count + PAGE_SIZE)} />}
             {messages.slice(-visibleCount).map(message => <View key={message.id} style={[styles.message, message.role === 'user' ? styles.userMessage : styles.assistantMessage]}>
               <View style={styles.messageHeader}><View style={styles.speakerMark}><Text style={styles.speakerMarkText}>{message.role === 'user' ? 'Y' : 'W'}</Text></View><Text style={[styles.messageRole, message.role === 'user' && styles.userMessageRole]}>{message.role === 'user' ? 'YOU' : 'WUK AI'}</Text><Text style={[styles.messageTime, message.role === 'user' && styles.userMessageTime]}>{formatTime(message.time)}</Text></View>
+              {message.imageUri ? <Image source={{ uri: message.imageUri }} accessibilityLabel={message.role === 'user' ? 'Photo attached to the question' : 'Image generated by Gemini'} resizeMode="contain" style={styles.chatImage} /> : message.imageRemoved ? <Text style={styles.imageRemoved}>Image cleared from temporary storage.</Text> : null}
               {message.role === 'assistant' ? <MarkdownMessage text={message.text} /> : <Text selectable style={styles.messageText}>{message.text}</Text>}
               {message.delivery === 'failed' && <View style={styles.deliveryRow}><Text style={styles.failedText}>NOT SENT</Text><Pressable accessibilityRole="button" onPress={() => retryMessage(message)} disabled={busy} style={styles.retryButton}><Text style={styles.retryText}>RETRY ↻</Text></Pressable></View>}
               {message.role === 'assistant' && <View style={styles.messageTools}>
@@ -395,10 +475,16 @@ export default function App() {
           </ScrollView>
           {banner ? <View accessibilityRole="alert" style={[styles.banner, connection === 'online' && styles.successBanner]}><Text style={styles.bannerText}>{banner}</Text><Pressable accessibilityLabel="Dismiss message" onPress={() => setBanner('')} hitSlop={10}><Text style={styles.bannerClose}>×</Text></Pressable></View> : null}
           <View style={[styles.composerWrap, { backgroundColor: pageBackground }]}>
+            {pendingImage ? <View style={styles.selectedImageRow}><Image source={{ uri: pendingImage.uri }} style={styles.selectedImage} accessibilityLabel="Selected photo preview" /><View style={{ flex: 1 }}><Text style={styles.selectedImageTitle}>PHOTO READY</Text><Text style={styles.selectedImageHint}>Sent only when you send your question</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Remove selected photo" onPress={() => setPendingImage(null)} style={styles.removeImage}><Text style={styles.bannerClose}>×</Text></Pressable></View> : null}
+            <View style={styles.mediaActions}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Choose a photo to ask Gemini about" disabled={busy} onPress={chooseImage} style={[styles.mediaAction, busy && styles.disabled]}><Text style={styles.mediaActionText}>＋ PHOTO</Text></Pressable>
+              <Pressable accessibilityRole="button" accessibilityState={{ selected: imageGenerationMode }} disabled={busy} onPress={() => { setImageGenerationMode(value => !value); setPendingImage(null); setBanner(''); }} style={[styles.mediaAction, imageGenerationMode && styles.mediaActionActive, busy && styles.disabled]}><Text style={[styles.mediaActionText, imageGenerationMode && styles.mediaActionActiveText]}>{imageGenerationMode ? 'IMAGE MODE ON' : 'CREATE IMAGE'}</Text></Pressable>
+              {imageGenerationMode ? <Text style={styles.imageModeHint}>Describe the image, then send.</Text> : null}
+            </View>
             <View style={styles.composer}>
               <Pressable accessibilityRole="button" accessibilityLabel={voiceListening ? 'Stop voice input' : 'Start voice input'} onPress={toggleListening} style={[styles.voiceButton, voiceListening && styles.voiceActive]}><Text style={[styles.voiceText, voiceListening && styles.voiceTextActive]}>{voiceListening ? '■' : 'MIC'}</Text></Pressable>
               <TextInput value={input} onChangeText={setInput} onSubmitEditing={sendMessage} placeholder={voiceListening ? 'Listening… edit transcript before sending' : 'Message WUK AI…'} placeholderTextColor={c.secondaryText} style={styles.input} returnKeyType="send" multiline maxLength={2000} editable={!busy} accessibilityLabel="Message WUK AI" />
-              {busy ? <Pressable accessibilityRole="button" accessibilityLabel="Stop waiting for response" onPress={() => requestRef.current?.abort()} style={styles.stopButton}><Text style={styles.stopText}>CANCEL</Text></Pressable> : <Pressable accessibilityRole="button" accessibilityLabel="Send message" onPress={sendMessage} disabled={!input.trim()} style={[styles.sendButton, !input.trim() && styles.disabled]}><Text style={styles.sendText}>↑</Text></Pressable>}
+              {busy ? <Pressable accessibilityRole="button" accessibilityLabel="Stop waiting for response" onPress={() => requestRef.current?.abort()} style={styles.stopButton}><Text style={styles.stopText}>CANCEL</Text></Pressable> : <Pressable accessibilityRole="button" accessibilityLabel={imageGenerationMode ? 'Generate image' : pendingImage ? 'Ask Gemini about selected image' : 'Send message'} onPress={sendMessage} disabled={!input.trim() && !pendingImage} style={[styles.sendButton, !input.trim() && !pendingImage && styles.disabled]}><Text style={styles.sendText}>↑</Text></Pressable>}
             </View>
             <Text style={styles.composerHint}>{voiceAvailable ? 'VOICE INPUT READY' : 'VOICE INPUT NEEDS A DEVELOPMENT BUILD'}  ·  LOCAL NOTES STAY ON THIS PHONE</Text>
           </View>
@@ -416,7 +502,7 @@ export default function App() {
           <View style={styles.settingCard}><View style={{ flex: 1 }}><Text style={styles.settingTitle}>Theme · {themeMode === 'frost' ? 'WUK Frost' : 'Pale Mist'}</Text><Text style={styles.settingDescription}>Switch between the two WUK blue palette backgrounds.</Text></View><SwitchRow value={themeMode === 'mist'} onValueChange={value => setThemeMode(value ? 'mist' : 'frost')} label="Switch between WUK Frost and Pale Mist themes" /></View>
           <View style={styles.settingCard}><View style={{ flex: 1 }}><Text style={styles.settingTitle}>Speak new responses</Text><Text style={styles.settingDescription}>Use the Android text-to-speech engine when replies arrive.</Text></View><SwitchRow value={autoSpeak} onValueChange={setAutoSpeak} label="Toggle spoken responses" /></View>
           <View style={styles.settingCard}><View style={{ flex: 1 }}><Text style={styles.settingTitle}>Matrix Rain</Text><Text style={styles.settingDescription}>A subtle moving background. Off by default to save battery.</Text></View><SwitchRow value={matrixEnabled} onValueChange={setMatrixEnabled} label="Toggle Matrix Rain" /></View>
-          <View style={styles.sectionCard}><Text style={styles.cardEyebrow}>LOCAL DATA</Text><DataRow label="Conversations" value={`${conversations.length}`} /><DataRow label="Messages" value={`${totalMessages}`} /><DataRow label="Notes" value={`${notes.length}`} /><DataRow label="Saved data estimate" value={formatBytes(storageBytes)} /><DataRow label="Temporary cache items" value={`${tempCacheCount}`} /><Text style={styles.dataFootnote}>Approximate JSON data size; Android storage overhead is not included. WUK AI does not save audio recordings.</Text></View>
+          <View style={styles.sectionCard}><Text style={styles.cardEyebrow}>LOCAL DATA</Text><DataRow label="Conversations" value={`${conversations.length}`} /><DataRow label="Messages" value={`${totalMessages}`} /><DataRow label="Notes" value={`${notes.length}`} /><DataRow label="Saved data estimate" value={formatBytes(storageBytes)} /><DataRow label="Temporary cache items (including images)" value={`${tempCacheCount}`} /><Text style={styles.dataFootnote}>Saved data estimate covers text/settings JSON; selected and generated image files use temporary device cache. Clearing cache removes those local image files but keeps conversation text. WUK AI does not save audio recordings.</Text></View>
           <Action label="CLEAR TEMPORARY CACHE" quiet onPress={clearTemporaryCache} />
           <Action label="CLEAR ALL CONVERSATIONS" quiet onPress={clearHistory} />
           <View style={styles.aboutCard}><Text style={styles.aboutTitle}>WUK AI <Text style={styles.aboutBrand}>by Wuk72</Text></Text><Text style={styles.settingDescription}>Version 1.0.0 · Expo SDK 57</Text><Text style={styles.settingDescription}>No notes or conversation history are uploaded unless you choose to send a message to the AI backend.</Text></View>
@@ -461,12 +547,14 @@ function formatBytes(bytes) { return bytes < 1024 ? `${bytes} B` : `${(bytes / 1
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: c.background }, container: { flex: 1, backgroundColor: 'transparent' },
+  chatImage: { width: '100%', height: 230, borderRadius: 12, backgroundColor: c.surface }, imageRemoved: { color: c.secondaryText, fontSize: 11, fontStyle: 'italic' },
+  mediaActions: { minHeight: 38, flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 5 }, mediaAction: { minHeight: 34, justifyContent: 'center', paddingHorizontal: 11, borderRadius: 12, backgroundColor: c.paleMist, borderWidth: 1, borderColor: c.border }, mediaActionActive: { backgroundColor: c.deepBlue, borderColor: c.deepBlue }, mediaActionText: { color: c.deepBlue, fontSize: 9, fontWeight: '800', letterSpacing: 0.4 }, mediaActionActiveText: { color: c.white }, imageModeHint: { flex: 1, color: c.secondaryText, fontSize: 9, textAlign: 'right' }, selectedImageRow: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 7, padding: 6, borderRadius: 13, backgroundColor: c.paleMist, borderWidth: 1, borderColor: c.border }, selectedImage: { width: 52, height: 52, borderRadius: 9, backgroundColor: c.surface }, selectedImageTitle: { color: c.deepBlue, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 }, selectedImageHint: { color: c.secondaryText, fontSize: 9, marginTop: 3 }, removeImage: { minWidth: 38, minHeight: 42, alignItems: 'center', justifyContent: 'center' },
   header: { minHeight: 70, paddingHorizontal: s.lg, paddingTop: s.sm, paddingBottom: s.sm, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: c.border, backgroundColor: c.background },
   brandRow: { flexDirection: 'row', alignItems: 'center', gap: 10 }, logo: { width: 42, height: 42, borderRadius: 13, backgroundColor: c.deepBlue, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.accent }, logoText: { color: c.paleMist, fontSize: 26, fontWeight: '800', letterSpacing: -2 }, brand: { color: c.primaryText, fontSize: 20, fontWeight: '800', letterSpacing: 1.5 }, subtitle: { color: c.secondaryText, fontSize: 8, letterSpacing: 0.9, marginTop: 3 }, headerActions: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   action: { minHeight: 44, paddingHorizontal: 13, borderRadius: 14, backgroundColor: c.deepBlue, alignItems: 'center', justifyContent: 'center' }, actionQuiet: { backgroundColor: c.paleMist, borderWidth: 1, borderColor: c.border }, actionText: { color: c.white, fontSize: 11, fontWeight: '800', letterSpacing: 0.4 }, actionQuietText: { color: c.deepBlue }, disabled: { opacity: 0.45 }, pressed: { opacity: 0.78 },
   content: { flex: 1, backgroundColor: 'transparent' }, chatContent: { padding: s.lg, paddingBottom: 20, gap: 12, flexGrow: 1 }, welcomeCard: { flex: 1, minHeight: 360, alignItems: 'center', justifyContent: 'center', paddingVertical: 26, gap: 12 }, welcomeMark: { width: 62, height: 62, borderRadius: 21, backgroundColor: c.deepBlue, alignItems: 'center', justifyContent: 'center', shadowColor: c.deepBlue, shadowOpacity: 0.18, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 4 }, welcomeMarkText: { fontSize: 35, fontWeight: '800', color: c.paleMist }, welcomeTitle: { color: c.primaryText, fontSize: 24, fontWeight: '700', textAlign: 'center', letterSpacing: -0.4 }, welcomeCopy: { maxWidth: 310, color: c.secondaryText, fontSize: 13, lineHeight: 19, textAlign: 'center' }, promptGrid: { width: '100%', maxWidth: 500, flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 12 }, promptCard: { width: '48%', minHeight: 72, flexGrow: 1, padding: 12, backgroundColor: c.paleMist, borderWidth: 1, borderColor: c.border, borderRadius: 15, justifyContent: 'space-between' }, promptText: { color: c.primaryText, fontSize: 12, lineHeight: 17, fontWeight: '600' }, promptArrow: { color: c.accent, fontSize: 14, alignSelf: 'flex-end' },
   message: { width: '100%', maxWidth: 620, borderRadius: 18, padding: 14, borderWidth: 1, gap: 8 }, userMessage: { alignSelf: 'flex-end', backgroundColor: c.deepBlue, borderColor: c.deepBlue, maxWidth: '92%' }, assistantMessage: { alignSelf: 'flex-start', backgroundColor: c.paleMist, borderColor: c.border, maxWidth: '96%' }, messageHeader: { flexDirection: 'row', alignItems: 'center', gap: 7 }, speakerMark: { width: 22, height: 22, borderRadius: 8, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' }, speakerMarkText: { fontSize: 11, fontWeight: '800', color: c.deepBlue }, messageRole: { color: c.deepBlue, fontSize: 10, fontWeight: '800', letterSpacing: 0.8 }, userMessageRole: { color: c.paleMist }, messageTime: { marginLeft: 'auto', color: c.secondaryText, fontSize: 10 }, userMessageTime: { color: c.paleMist }, messageText: { color: c.white, fontSize: 14, lineHeight: 21 }, messageTools: { flexDirection: 'row', gap: 7, marginTop: 4 }, toolButton: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 10, backgroundColor: c.surface, borderRadius: 10 }, toolText: { color: c.deepBlue, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 }, deliveryRow: { minHeight: 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, failedText: { color: c.error, fontSize: 10, fontWeight: '800', letterSpacing: 0.6 }, retryButton: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 10, borderWidth: 1, borderColor: c.error, borderRadius: 10 }, retryText: { color: c.error, fontWeight: '800', fontSize: 10 }, typing: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 13, backgroundColor: c.paleMist, borderRadius: 14, alignSelf: 'flex-start' }, typingText: { color: c.secondaryText, fontSize: 12 },
-  banner: { marginHorizontal: 12, marginBottom: 6, paddingHorizontal: 12, paddingVertical: 9, minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#F7E8E9', borderRadius: 12, borderWidth: 1, borderColor: '#E8C4C8' }, successBanner: { backgroundColor: '#E5F3ED', borderColor: '#C4E1D5' }, bannerText: { flex: 1, color: c.primaryText, fontSize: 11, lineHeight: 16 }, bannerClose: { color: c.secondaryText, fontSize: 20, paddingHorizontal: 4 }, composerWrap: { paddingHorizontal: 10, paddingTop: 8, paddingBottom: Platform.OS === 'android' ? 36 : 7, borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.background }, composer: { minHeight: 54, flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 5, backgroundColor: c.paleMist, borderWidth: 1, borderColor: c.border, borderRadius: 20 }, input: { flex: 1, minHeight: 42, maxHeight: 112, color: c.primaryText, paddingHorizontal: 7, paddingTop: 11, paddingBottom: 8, fontSize: 14, lineHeight: 20 }, voiceButton: { width: 42, height: 42, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface }, voiceActive: { backgroundColor: '#F7E8E9' }, voiceText: { color: c.deepBlue, fontSize: 10, fontWeight: '800' }, voiceTextActive: { color: c.error }, sendButton: { width: 42, height: 42, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: c.deepBlue }, sendText: { color: c.white, fontSize: 25, lineHeight: 28, fontWeight: '600' }, stopButton: { height: 42, paddingHorizontal: 12, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F7E8E9' }, stopText: { color: c.error, fontSize: 10, fontWeight: '800' }, composerHint: { color: c.secondaryText, textAlign: 'center', fontSize: 8, letterSpacing: 0.45, paddingTop: 7 },
+  banner: { marginHorizontal: 12, marginBottom: 6, paddingHorizontal: 12, paddingVertical: 9, minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#F7E8E9', borderRadius: 12, borderWidth: 1, borderColor: '#E8C4C8' }, successBanner: { backgroundColor: '#E5F3ED', borderColor: '#C4E1D5' }, bannerText: { flex: 1, color: c.primaryText, fontSize: 11, lineHeight: 16 }, bannerClose: { color: c.secondaryText, fontSize: 20, paddingHorizontal: 4 }, composerWrap: { paddingHorizontal: 10, paddingTop: 8, paddingBottom: Platform.OS === 'android' ? 48 : 7, borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.background }, composer: { minHeight: 54, flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 5, backgroundColor: c.paleMist, borderWidth: 1, borderColor: c.border, borderRadius: 20 }, input: { flex: 1, minHeight: 42, maxHeight: 112, color: c.primaryText, paddingHorizontal: 7, paddingTop: 11, paddingBottom: 8, fontSize: 14, lineHeight: 20 }, voiceButton: { width: 42, height: 42, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface }, voiceActive: { backgroundColor: '#F7E8E9' }, voiceText: { color: c.deepBlue, fontSize: 10, fontWeight: '800' }, voiceTextActive: { color: c.error }, sendButton: { width: 42, height: 42, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: c.deepBlue }, sendText: { color: c.white, fontSize: 25, lineHeight: 28, fontWeight: '600' }, stopButton: { height: 42, paddingHorizontal: 12, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F7E8E9' }, stopText: { color: c.error, fontSize: 10, fontWeight: '800' }, composerHint: { color: c.secondaryText, textAlign: 'center', fontSize: 8, letterSpacing: 0.45, paddingTop: 7 },
   navigationMenu: { alignSelf: 'stretch', marginTop: 'auto', padding: 18, gap: 8, backgroundColor: c.paleMist, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderWidth: 1, borderColor: c.border }, navigationItem: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: c.border }, navigationItemText: { color: c.primaryText, fontSize: 14, fontWeight: '700' },
   pageContent: { padding: s.lg, gap: 13, paddingBottom: 28 }, pageHeadingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, pageEyebrow: { color: c.deepBlue, fontSize: 10, fontWeight: '800', letterSpacing: 1.1 }, pageTitle: { color: c.primaryText, fontSize: 27, fontWeight: '700', letterSpacing: -0.5, marginTop: 3 }, pageDescription: { color: c.secondaryText, fontSize: 13, lineHeight: 19, marginBottom: 4 }, emptyCard: { backgroundColor: c.paleMist, padding: 18, borderRadius: 16, borderWidth: 1, borderColor: c.border }, emptyCopy: { color: c.secondaryText, fontSize: 13, lineHeight: 19 }, conversationCard: { minHeight: 84, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.paleMist, borderRadius: 16, borderWidth: 1, borderColor: c.border }, currentConversation: { borderColor: c.accent }, conversationIcon: { width: 38, height: 38, borderRadius: 14, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center' }, conversationIconText: { color: c.deepBlue, fontWeight: '800', fontSize: 18 }, conversationInfo: { flex: 1, gap: 3 }, conversationTitle: { color: c.primaryText, fontSize: 13, fontWeight: '700' }, conversationSummary: { color: c.secondaryText, fontSize: 11 }, conversationMeta: { color: c.secondaryText, fontSize: 9 }, deleteConversation: { minWidth: 35, minHeight: 40, alignItems: 'center', justifyContent: 'center' }, deleteConversationText: { color: c.error, fontSize: 24 }, noteCard: { backgroundColor: c.paleMist, borderWidth: 1, borderColor: c.border, borderRadius: 16, padding: 15, gap: 12 }, noteText: { color: c.primaryText, fontSize: 14, lineHeight: 21 }, noteFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, noteDate: { color: c.secondaryText, fontSize: 10 }, noteDelete: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 8 }, noteDeleteText: { color: c.error, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
   settingCard: { minHeight: 74, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: c.border, borderRadius: 16, backgroundColor: c.paleMist }, settingTitle: { color: c.primaryText, fontSize: 13, fontWeight: '700' }, settingDescription: { color: c.secondaryText, fontSize: 11, lineHeight: 16, marginTop: 3 }, settingUrl: { color: c.deepBlue, fontSize: 10, marginTop: 5 }, settingChevron: { color: c.deepBlue, fontSize: 26 }, switchTrack: { width: 48, height: 28, borderRadius: 16, padding: 3, justifyContent: 'center', backgroundColor: c.border }, switchTrackOn: { backgroundColor: c.deepBlue }, switchThumb: { width: 22, height: 22, borderRadius: 11, backgroundColor: c.white }, switchThumbOn: { alignSelf: 'flex-end' }, sectionCard: { padding: 14, borderWidth: 1, borderColor: c.border, borderRadius: 16, backgroundColor: c.paleMist }, cardEyebrow: { color: c.deepBlue, fontSize: 9, fontWeight: '800', letterSpacing: 1, marginBottom: 4 }, dataRow: { minHeight: 40, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: c.border }, dataLabel: { color: c.secondaryText, fontSize: 11 }, dataValue: { color: c.primaryText, fontSize: 12, fontWeight: '700' }, dataFootnote: { color: c.secondaryText, fontSize: 10, lineHeight: 15, marginTop: 10 }, aboutCard: { gap: 5, padding: 14, backgroundColor: c.surface, borderRadius: 16 }, aboutTitle: { color: c.primaryText, fontSize: 16, fontWeight: '800' }, aboutBrand: { color: c.deepBlue, fontSize: 13 }, smallHint: { color: c.secondaryText, fontSize: 10, lineHeight: 15, paddingHorizontal: 3 },
