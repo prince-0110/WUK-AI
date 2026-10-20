@@ -164,27 +164,31 @@ export function createProviders(env = process.env) {
       },
       async vision(prompt, image, mimeType) {
         try {
-          const interaction = await gemini.interactions.create({
-            model: geminiModel,
-            input: [
-              { type: 'text', text: prompt || 'Describe this image and answer what you can see.' },
-              { type: 'image', data: image, mime_type: mimeType }
-            ],
-            system_instruction: SYSTEM_PROMPT,
-            store: false
-          });
-          return extractGeminiText(interaction);
+          const response = await fetchJson('gemini', `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent`, {
+            method: 'POST',
+            headers: { 'x-goog-api-key': geminiKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+              contents: [{ role: 'user', parts: [
+                { text: prompt || 'Describe this image and answer what you can see.' },
+                { inlineData: { mimeType, data: image } }
+              ] }],
+              generationConfig: { responseModalities: ['TEXT'] }
+            })
+          }, { timeoutMs: 60_000 });
+          return extractGeminiGenerateContent(response);
         } catch (error) {
+          if (error instanceof ProviderError) throw error;
           throw new ProviderError('gemini', Number(error?.status) || 0);
         }
       },
       async generateImage(prompt) {
         try {
-          const response = await gemini.models.generateContent({
-            model: geminiImageModel,
-            contents: prompt,
-            config: { responseModalities: ['IMAGE'] }
-          });
+          const response = await fetchJson('gemini', `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiImageModel)}:generateContent`, {
+            method: 'POST',
+            headers: { 'x-goog-api-key': geminiKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseModalities: ['IMAGE'] } })
+          }, { timeoutMs: 120_000 });
           const parts = response.candidates?.flatMap(candidate => candidate.content?.parts || []) || [];
           const generated = parts.find(part => part.inlineData?.data);
           if (!generated) throw new ProviderError('gemini', 502);
@@ -239,4 +243,9 @@ function extractGeminiText(interaction) {
   for (const step of interaction.steps || []) if (step.type === 'model_output') for (const item of step.content || []) if (item.type === 'text' && item.text) parts.push(item.text);
   for (const output of interaction.outputs || []) if (output.type === 'text' && output.text) parts.push(output.text);
   return { text: parts.join('\n').trim(), citations: [] };
+}
+
+function extractGeminiGenerateContent(response) {
+  const parts = response.candidates?.flatMap(candidate => candidate.content?.parts || []) || [];
+  return { text: parts.filter(part => typeof part.text === 'string').map(part => part.text).join('\n').trim(), citations: [] };
 }
