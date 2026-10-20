@@ -12,7 +12,7 @@ export function createCorsMiddleware({ origins = '', production = process.env.NO
     }
     if (req.method === 'OPTIONS') {
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type');
+      res.setHeader('Access-Control-Allow-Headers', 'X-Backend-Password,Content-Type');
       return res.status(204).end();
     }
     next();

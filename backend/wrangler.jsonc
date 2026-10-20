@@ -10,7 +10,12 @@
   ],
   "workers_dev": true,
   "vars": {
-    "NODE_ENV": "production"
+    "NODE_ENV": "production",
+    "GEMINI_MODEL": "gemini-3.8-flash",
+    "GEMINI_IMAGE_MODEL": "gemini-3.1-flash-image",
+    "CLOUDFLARE_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    "CLOUDFLARE_VISION_MODEL": "@cf/qwen/qwen3.8-27b",
+    "CLOUDFLARE_IMAGE_MODEL": "@cf/stabilityai/stable-diffusion-xl-base-1.0"
   },
   "observability": {
     "enabled": true

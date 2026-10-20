@@ -6,7 +6,7 @@ import { createProviders, providerCandidates, ProviderError, withProviderFallbac
 import { createCorsMiddleware } from './cors.js';
 
 export const port = Number(process.env.PORT || 8787);
-const accessPassword = process.env.API_ACCESS_PASSWORD || process.env.API_ACCESS_TOKEN || '';
+const accessPassword = process.env.API_ACCESS_PASSWORD || '';
 const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 const imageModel = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
 
@@ -19,8 +19,7 @@ app.use(createCorsMiddleware({ origins: process.env.WEB_ORIGINS }));
 app.use(express.json({ limit: '6mb', strict: true }));
 
 function authorized(req, res, next) {
-  const header = req.get('authorization') || '';
-  const supplied = header.startsWith('Bearer ') ? header.slice(7) : '';
+  const supplied = req.get('x-backend-password') || '';
   const expectedBytes = Buffer.from(accessPassword);
   const suppliedBytes = Buffer.from(supplied);
   const valid = accessPassword.length >= 12 && expectedBytes.length === suppliedBytes.length && crypto.timingSafeEqual(expectedBytes, suppliedBytes);
@@ -133,9 +132,17 @@ app.post('/api/image', authorized, imageLimit, async (req, res) => {
   }
 });
 
-app.use((error, _req, res, _next) => {
+app.use((error, req, res, _next) => {
   if (error?.type === 'entity.too.large') return res.status(413).json({ error: 'Request is too large.' });
   if (error instanceof SyntaxError) return res.status(400).json({ error: 'Request body must be valid JSON.' });
-  console.error('Unexpected backend error.');
+  // Keep implementation details out of the API response, but log enough context
+  // in the private Worker logs to diagnose failures without logging credentials
+  // or request bodies.
+  console.error('Unexpected backend error.', {
+    method: req.method,
+    path: req.path,
+    name: error?.name || 'Error',
+    message: error?.message || String(error),
+  });
   return res.status(500).json({ error: 'Unexpected backend error.' });
 });

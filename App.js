@@ -5,6 +5,7 @@ import {
   Text, TextInput, View, useWindowDimensions,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import * as Speech from 'expo-speech';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
@@ -20,9 +21,23 @@ const LEGACY_STORAGE_KEY = '@wuk72_wuk_ai_chat_v1';
 const OLDER_STORAGE_KEY = '@wuk72_jarvis_chat_v1';
 const PAGE_SIZE = 40;
 const TEMP_CACHE_PREFIX = '@wuk72_cache_';
+const BACKEND_PASSWORD_KEY = 'wuk72_backend_password';
 const IMAGE_CACHE_DIR = FileSystem.cacheDirectory ? `${FileSystem.cacheDirectory}wuk-ai-chat-images/` : null;
 const MAX_IMAGE_BASE64_LENGTH = 4_800_000;
 const webImageCache = new Map();
+async function getSavedBackendPassword() {
+  if (Platform.OS === 'web') return globalThis.localStorage?.getItem(BACKEND_PASSWORD_KEY) || '';
+  return (await SecureStore.getItemAsync(BACKEND_PASSWORD_KEY)) || '';
+}
+async function saveBackendPassword(password) {
+  if (Platform.OS === 'web') {
+    if (password) globalThis.localStorage?.setItem(BACKEND_PASSWORD_KEY, password);
+    else globalThis.localStorage?.removeItem(BACKEND_PASSWORD_KEY);
+    return;
+  }
+  if (password) await SecureStore.setItemAsync(BACKEND_PASSWORD_KEY, password);
+  else await SecureStore.deleteItemAsync(BACKEND_PASSWORD_KEY);
+}
 const newId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const welcomeMessage = () => ({
   id: newId(), role: 'assistant', time: new Date().toISOString(),
@@ -30,7 +45,7 @@ const welcomeMessage = () => ({
 });
 const newConversation = (messages = [welcomeMessage()]) => ({ id: newId(), title: 'New conversation', updatedAt: new Date().toISOString(), messages });
 
-const needsFreshResearch = raw => /\b(latest|today|yesterday|current|currently|right now|recent|news|price|cost|exchange rate|weather|score|schedule|release date|new version|updated|this year|202[5-9]|20[3-9]\d|who is the (current|new)|president|ceo|election|stock|bitcoin|\bapi\b|documentation|docs)\b/i.test(raw);
+const needsFreshResearch = raw => /\b(latest|today|yesterday|current|currently|right now|recent|news|price|cost|exchange rate|weather|score|schedule|release date|new version|updated|this year|202[5-9]|20[3-9]\d|who is the (current|new)|president|ceo|election|stock|bitcoin|documentation|docs)\b/i.test(raw);
 
 const localCommand = raw => {
   const q = raw.trim().toLowerCase();
@@ -92,8 +107,8 @@ export default function App() {
   const [screen, setScreen] = useState('chat');
   const [backendUrl, setBackendUrl] = useState(DEFAULT_API_URL);
   const [draftUrl, setDraftUrl] = useState(DEFAULT_API_URL);
-  const [accessToken, setAccessToken] = useState('');
-  const [draftToken, setDraftToken] = useState('');
+  const [backendPassword, setBackendPassword] = useState('');
+  const [draftPassword, setDraftPassword] = useState('');
   const [providers, setProviders] = useState([]);
   const [selectedProvider, setSelectedProvider] = useState('auto');
   const [researchMode, setResearchMode] = useState('automatic');
@@ -155,6 +170,10 @@ export default function App() {
           if (typeof data.activeId === 'string') setActiveId(data.activeId);
         }
       } catch { setBanner('Some saved data could not be read. You can keep using WUK AI and your original data is untouched.'); }
+      try {
+        const savedPassword = await getSavedBackendPassword();
+        if (savedPassword) { setBackendPassword(savedPassword); setDraftPassword(savedPassword); }
+      } catch { setBanner('Could not load the saved backend password. Re-enter it in Settings and save the connection.'); }
       finally { setHydrated(true); }
     })();
     return () => { isMounted.current = false; requestRef.current?.abort(); Speech.stop(); speechRecognition?.stop?.(); browserRecognitionRef.current?.stop?.(); webImageCache.forEach((_base64, uri) => URL.revokeObjectURL(uri)); webImageCache.clear(); };
@@ -239,14 +258,14 @@ export default function App() {
     try {
       let reply;
       if (media.generateImage) {
-        const result = await generateImage(backendUrl, accessToken, context.at(-1)?.text, controller.signal, selectedProvider, allowFallback);
+        const result = await generateImage(backendUrl, backendPassword, context.at(-1)?.text, controller.signal, selectedProvider, allowFallback);
         const imageUri = await writeChatImage(result.image.data, newId(), result.image.mimeType);
         reply = result.reply;
         if (!isMounted.current) return;
         updateDelivery(id, userMessageId, 'sent');
         addAssistant(id, reply, imageUri, { provider: result.provider, providerName: result.providerName, model: result.model, fallback: result.fallback });
       } else if (media.imageBase64) {
-        const result = await askAboutImage(backendUrl, accessToken, context.at(-1)?.text || 'Describe this image.', media.imageBase64, media.mimeType || 'image/jpeg', controller.signal, selectedProvider, allowFallback || selectedProvider === 'auto');
+        const result = await askAboutImage(backendUrl, backendPassword, context.at(-1)?.text || 'Describe this image.', media.imageBase64, media.mimeType || 'image/jpeg', controller.signal, selectedProvider, allowFallback || selectedProvider === 'auto');
         reply = result.reply;
         if (!isMounted.current) return;
         updateDelivery(id, userMessageId, 'sent');
@@ -254,7 +273,7 @@ export default function App() {
       } else {
         const prompt = context.at(-1)?.text || '';
         const research = researchMode === 'always' || (researchMode === 'automatic' && needsFreshResearch(prompt));
-        const result = await sendToBackend(backendUrl, accessToken, context, controller.signal, { provider: selectedProvider, research, allowFallback });
+        const result = await sendToBackend(backendUrl, backendPassword, context.slice(-10), controller.signal, { provider: selectedProvider, research, allowFallback });
         reply = result.reply;
         if (!isMounted.current) return;
         updateDelivery(id, userMessageId, 'sent');
@@ -324,7 +343,7 @@ export default function App() {
       if (autoSpeak) speak({ id: `reply-${newId()}`, text: local.reply });
       return;
     }
-    if (!accessToken.trim()) {
+    if (!backendPassword.trim()) {
       updateDelivery(id, userMessage.id, 'failed');
       setConnection('reachable');
       setConnectionMessage('Backend is up · password needed');
@@ -342,7 +361,7 @@ export default function App() {
     if (busy || !activeConversation || !message) return;
     const index = messages.findIndex(item => item.id === message.id);
     if (index === -1 || message.role !== 'user') return;
-    if (!accessToken.trim()) { setBanner('Add the backend password in Settings, then retry this message.'); return; }
+    if (!backendPassword.trim()) { setBanner('Add the backend password in Settings, then retry this message.'); return; }
     const id = activeConversation.id;
     const transcript = messages.slice(0, index + 1).map(item => ({ ...item, delivery: item.id === message.id ? 'pending' : item.delivery }));
     updateConversation(id, list => [...list.slice(0, index), { ...list[index], delivery: 'pending' }, ...list.slice(index + 1)]);
@@ -437,7 +456,7 @@ export default function App() {
   async function testConnection() {
     setChecking(true); setConnection('checking'); setConnectionMessage('Checking backend and configured providers…'); setBanner('');
     try {
-      const result = await checkBackend(draftUrl, draftToken);
+      const result = await checkBackend(draftUrl, draftPassword);
       setConnection('reachable');
       setConnectionMessage(result.message);
       if (result.providers) setProviders(result.providers);
@@ -448,11 +467,13 @@ export default function App() {
     } finally { setChecking(false); }
   }
 
-  function saveConnection() {
+  async function saveConnection() {
     const url = draftUrl.trim().replace(/\/+$/, '');
     if (!/^https?:\/\//i.test(url)) { Alert.alert('Check the server address', 'Enter a complete address beginning with https:// or http://.'); return; }
-    setBackendUrl(url); setAccessToken(draftToken.trim()); setSettingsOpen(false);
-    setConnection('reachable'); setConnectionMessage(draftToken.trim() ? 'Connection saved · run a test to check configured providers' : 'Backend address saved · add password to use AI');
+    try { await saveBackendPassword(draftPassword.trim()); }
+    catch { Alert.alert('Could not save password', 'WUK AI could not store the backend password securely. Check device storage and try again.'); return; }
+    setBackendUrl(url); setBackendPassword(draftPassword.trim()); setSettingsOpen(false);
+    setConnection('reachable'); setConnectionMessage(draftPassword.trim() ? 'Connection saved · run a test to check configured providers' : 'Backend address saved · add password to use AI');
     setBanner('');
   }
 
@@ -517,7 +538,7 @@ export default function App() {
         <ScrollView style={styles.sidebarList} contentContainerStyle={{ gap: 5 }}>
           {[...conversations].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).filter(item => `${item.title} ${item.messages.filter(m => m.role === 'user').map(m => m.text).join(' ')}`.toLowerCase().includes(historySearch.toLowerCase())).map(item => <Pressable key={item.id} onPress={() => { setActiveId(item.id); setScreen('chat'); setVisibleCount(PAGE_SIZE); setBanner(''); }} style={[styles.sidebarItem, item.id === activeId && styles.sidebarItemActive]}><Text numberOfLines={1} style={styles.sidebarItemTitle}>{item.title}</Text><Text numberOfLines={1} style={styles.sidebarItemSummary}>{item.messages.filter(m => m.role === 'user').at(-1)?.text || 'No messages yet'}</Text></Pressable>)}
         </ScrollView>
-        {['history', 'notes', 'connections', 'settings'].map(key => <Pressable key={key} accessibilityRole="button" onPress={() => key === 'settings' ? (setDraftUrl(backendUrl), setDraftToken(accessToken), setSettingsOpen(true)) : setScreen(key)} style={styles.sidebarNav}><Text style={styles.sidebarNavText}>{({ history: 'Conversations', notes: 'Notes', connections: 'Connections', settings: 'Settings' })[key]}</Text></Pressable>)}
+        {['history', 'notes', 'connections', 'settings'].map(key => <Pressable key={key} accessibilityRole="button" onPress={() => key === 'settings' ? (setDraftUrl(backendUrl), setDraftPassword(backendPassword), setSettingsOpen(true)) : setScreen(key)} style={styles.sidebarNav}><Text style={styles.sidebarNavText}>{({ history: 'Conversations', notes: 'Notes', connections: 'Connections', settings: 'Settings' })[key]}</Text></Pressable>)}
       </View> : null}
       <KeyboardAvoidingView style={[styles.container, isDesktopWeb && styles.desktopMain]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={[styles.header, { backgroundColor: pageBackground }]}>
@@ -527,7 +548,7 @@ export default function App() {
           </View>
           <View style={styles.headerActions}>
             <Action label="☰" quiet accessibilityLabel="Open navigation menu" onPress={() => setNavigationOpen(true)} />
-            <Action label="SETTINGS" quiet onPress={() => { setDraftUrl(backendUrl); setDraftToken(accessToken); setSettingsOpen(true); }} />
+            <Action label="SETTINGS" quiet onPress={() => { setDraftUrl(backendUrl); setDraftPassword(backendPassword); setSettingsOpen(true); }} />
           </View>
         </View>
 
@@ -586,7 +607,7 @@ export default function App() {
           <View style={styles.sectionCard}><Text style={styles.cardEyebrow}>SERVER-MANAGED PROVIDERS</Text><Pressable accessibilityRole="radio" accessibilityState={{ selected: selectedProvider === 'auto' }} onPress={() => setSelectedProvider('auto')} style={[styles.providerChoice, selectedProvider === 'auto' && styles.providerChoiceSelected]}><View style={{ flex: 1 }}><Text style={styles.settingTitle}>Auto · Best available</Text><Text style={styles.settingDescription}>Chooses a provider that supports the task and tries another compatible provider after a rate limit or outage.</Text></View><Text style={styles.providerCheck}>{selectedProvider === 'auto' ? '✓' : ''}</Text></Pressable>{providers.map(item => <Pressable key={item.id} accessibilityRole="radio" accessibilityState={{ selected: selectedProvider === item.id, disabled: !item.configured }} disabled={!item.configured} onPress={() => setSelectedProvider(item.id)} style={[styles.providerChoice, selectedProvider === item.id && styles.providerChoiceSelected, !item.configured && styles.disabled]}><View style={{ flex: 1 }}><Text style={styles.settingTitle}>{item.name}{item.model ? ` · ${item.model}` : ''}</Text><Text style={styles.settingDescription}>{item.configured ? `Available · ${item.capabilities.join(', ')}` : 'Not configured on backend'}</Text></View><Text style={styles.providerCheck}>{selectedProvider === item.id ? '✓' : ''}</Text></Pressable>)}<Text style={styles.dataFootnote}>Provider credentials are stored on your backend and shared by this installation. They are API credentials, not your Gemini/Claude/ChatGPT consumer subscriptions. Providers may charge separately; automatic fallback can send the same request to another provider.</Text></View>
           <Pressable accessibilityRole="button" onPress={() => setResearchMode(value => value === 'automatic' ? 'off' : value === 'off' ? 'always' : 'automatic')} style={styles.settingCard}><View style={{ flex: 1 }}><Text style={styles.settingTitle}>Web research · {researchMode === 'automatic' ? 'Automatic' : researchMode === 'always' ? 'Always' : 'Off'}</Text><Text style={styles.settingDescription}>{researchMode === 'automatic' ? 'Search likely current topics such as news, prices, and current docs.' : researchMode === 'always' ? 'Use the selected provider’s search tool for every text question.' : 'Do not request web search.'}</Text></View><Text style={styles.settingChevron}>↻</Text></Pressable>
           <View style={styles.settingCard}><View style={{ flex: 1 }}><Text style={styles.settingTitle}>Allow provider fallback</Text><Text style={styles.settingDescription}>Auto always tries compatible alternatives. With a specific provider selected, this can retry on another compatible provider after a quota or service failure.</Text></View><SwitchRow value={allowFallback} onValueChange={setAllowFallback} label="Allow fallback to another provider when selecting a specific provider" /></View>
-          <View style={styles.aboutCard}><Text style={styles.aboutTitle}>Connection status</Text><Text style={styles.settingDescription}>{connectionMessage}</Text><Text style={styles.settingUrl}>{backendUrl}</Text><Action label="CONFIGURE BACKEND PASSWORD" quiet onPress={() => { setDraftUrl(backendUrl); setDraftToken(accessToken); setSettingsOpen(true); }} /></View>
+          <View style={styles.aboutCard}><Text style={styles.aboutTitle}>Connection status</Text><Text style={styles.settingDescription}>{connectionMessage}</Text><Text style={styles.settingUrl}>{backendUrl}</Text><Action label="CONFIGURE BACKEND PASSWORD" quiet onPress={() => { setDraftUrl(backendUrl); setDraftPassword(backendPassword); setSettingsOpen(true); }} /></View>
           <Text style={styles.smallHint}>Personal OAuth accounts, a per-user credential vault, and ChatGPT plan-sharing authorization are not available in this project yet. OpenAI partner eligibility is required for using a ChatGPT plan in a third-party app.</Text>
         </ScrollView> : <ScrollView style={styles.content} contentContainerStyle={styles.pageContent}>
           <Text style={styles.pageEyebrow}>PREFERENCES & DIAGNOSTICS</Text><Text style={styles.pageTitle}>Settings</Text>
@@ -618,10 +639,10 @@ export default function App() {
 
       <Modal visible={settingsOpen} transparent animationType="fade" onRequestClose={() => setSettingsOpen(false)}>
         <View style={styles.modalBackdrop}><ScrollView contentContainerStyle={styles.modalScroll} keyboardShouldPersistTaps="handled"><View style={styles.settingsModal}>
-          <Text style={styles.pageEyebrow}>WUK72 · PRIVATE CONNECTION</Text><Text style={styles.modalTitle}>Backend connection</Text><Text style={styles.modalDescription}>The app calls your Node backend. Provider API keys stay in the server environment. The backend password is kept only in app memory for this session.</Text>
+          <Text style={styles.pageEyebrow}>WUK72 · PRIVATE CONNECTION</Text><Text style={styles.modalTitle}>Backend connection</Text><Text style={styles.modalDescription}>The backend password is saved on this device and loaded automatically when WUK AI opens. Android stores it in encrypted secure storage; the website saves it in this browser. Provider API keys remain on the backend.</Text>
           <Text style={styles.fieldLabel}>BACKEND URL</Text><TextInput value={draftUrl} onChangeText={setDraftUrl} autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholder="https://wuk-ai.onrender.com" placeholderTextColor={c.secondaryText} style={styles.fieldInput} />
-          <Text style={styles.fieldLabel}>BACKEND PASSWORD</Text><TextInput value={draftToken} onChangeText={setDraftToken} autoCapitalize="none" autoCorrect={false} secureTextEntry placeholder="Enter the backend password" placeholderTextColor={c.secondaryText} style={styles.fieldInput} />
-          <Text style={styles.fieldHint}>Health check proves the service is reachable. The authenticated status check reports server-configured providers. The password is kept only in memory for this session and is not saved to chat history or local storage.</Text>
+          <Text style={styles.fieldLabel}>BACKEND PASSWORD</Text><TextInput value={draftPassword} onChangeText={setDraftPassword} autoCapitalize="none" autoCorrect={false} secureTextEntry placeholder="Enter the backend password" placeholderTextColor={c.secondaryText} style={styles.fieldInput} />
+          <Text style={styles.fieldHint}>Health checks confirm the service is reachable. The password is sent only to your backend over HTTPS and is not saved with chat history. On Android it is encrypted in secure device storage.</Text>
           <View style={styles.modalActions}><Action label="CANCEL" quiet onPress={() => setSettingsOpen(false)} /><Action label={checking ? 'CHECKING…' : 'TEST CONNECTION'} quiet disabled={checking} onPress={testConnection} /></View>
           <View style={styles.modalActions}><Action label="SAVE CONNECTION" onPress={saveConnection} /><Action label="OPEN HEALTH" quiet onPress={() => Linking.openURL(`${draftUrl.trim().replace(/\/+$/, '')}/health`)} /></View>
           {checking ? <View style={styles.checkingRow}><ActivityIndicator color={c.deepBlue} /><Text style={styles.fieldHint}>Render may need a moment to wake up.</Text></View> : null}

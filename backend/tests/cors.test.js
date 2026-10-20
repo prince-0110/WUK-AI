@@ -28,6 +28,6 @@ test('development allows local Expo web origins and preflights requested headers
   const response = invoke(middleware, { origin: 'http://localhost:8081', method: 'OPTIONS' });
   assert.equal(response.statusCode, 204);
   assert.equal(response.ended, true);
-  assert.match(response.headers['Access-Control-Allow-Headers'], /Authorization/);
+  assert.match(response.headers['Access-Control-Allow-Headers'], /X-Backend-Password/i);
   assert.equal(invoke(middleware, { origin: 'https://random.example' }).statusCode, 403);
 });

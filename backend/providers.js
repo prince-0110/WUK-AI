@@ -40,6 +40,7 @@ export function providerCandidates(providers, requested = 'auto', capability = '
 export async function withProviderFallback(candidates, requested, allowFallback, run) {
   const attempts = allowFallback ? candidates : candidates.slice(0, 1);
   let lastError;
+  let timedOutAttempts = 0;
   for (let index = 0; index < attempts.length; index += 1) {
     const provider = attempts[index];
     try {
@@ -47,7 +48,8 @@ export async function withProviderFallback(candidates, requested, allowFallback,
       return { provider, result, fallback: index > 0 || (requested !== 'auto' && provider.id !== requested) };
     } catch (error) {
       lastError = error;
-      if (!isFallbackEligible(error) || index === attempts.length - 1) throw error;
+      if (error instanceof ProviderError && (error.status === 408 || error.status === 504)) timedOutAttempts += 1;
+      if (!isFallbackEligible(error) || index === attempts.length - 1 || timedOutAttempts >= 2) throw error;
       console.warn(`${provider.id} unavailable; trying the next compatible provider.`);
     }
   }
@@ -92,9 +94,9 @@ function normalizeCitations(items) {
   }).slice(0, 12);
 }
 
-async function fetchJson(provider, url, options) {
+async function fetchJson(provider, url, options, { timeoutMs = 60_000 } = {}) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 60_000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
     let body;
@@ -133,6 +135,7 @@ function extractAnthropic(response) {
 }
 
 export function createProviders(env = process.env) {
+  const chatTimeoutMs = 25_000;
   const geminiKey = configured(env.GEMINI_API_KEY) ? env.GEMINI_API_KEY : '';
   const openAiKey = configured(env.OPENAI_API_KEY) ? env.OPENAI_API_KEY : '';
   const anthropicKey = configured(env.ANTHROPIC_API_KEY) ? env.ANTHROPIC_API_KEY : '';
@@ -143,7 +146,7 @@ export function createProviders(env = process.env) {
   const anthropicModel = env.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
   // Keep the existing multimedia client separate from the bounded-time chat client.
   const gemini = geminiKey ? new GoogleGenAI({ apiKey: geminiKey }) : null;
-  const geminiChat = geminiKey ? new GoogleGenAI({ apiKey: geminiKey, httpOptions: { timeout: 60_000 } }) : null;
+  const geminiChat = geminiKey ? new GoogleGenAI({ apiKey: geminiKey, httpOptions: { timeout: chatTimeoutMs } }) : null;
 
   const providers = {
     gemini: {
@@ -155,14 +158,15 @@ export function createProviders(env = process.env) {
           const result = extractGeminiText(interaction);
           return { ...result, citations: research ? citationsFromGemini(interaction) : [] };
         } catch (error) {
-          throw new ProviderError('gemini', Number(error?.status) || 0);
+          const timedOut = error?.name === 'AbortError' || error?.name === 'TimeoutError' || /timed out|timeout|aborted/i.test(error?.message || '');
+          throw new ProviderError('gemini', Number(error?.status) || (timedOut ? 504 : 0));
         }
       }
     },
     openai: {
       id: 'openai', name: 'OpenAI API', model: openAiModel, visionModel: openAiModel, imageModel: openAiImageModel, configured: Boolean(openAiKey), capabilities: ['chat', 'vision', 'webResearch', 'image'],
       async chat(messages, research) {
-        const response = await fetchJson('openai', 'https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${openAiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: openAiModel, instructions: SYSTEM_PROMPT, input: messages.map(({ role, content }) => ({ role, content })), ...(research ? { tools: [{ type: 'web_search' }] } : {}), store: false }) });
+        const response = await fetchJson('openai', 'https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${openAiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: openAiModel, instructions: SYSTEM_PROMPT, input: messages.map(({ role, content }) => ({ role, content })), ...(research ? { tools: [{ type: 'web_search' }] } : {}), store: false }) }, { timeoutMs: chatTimeoutMs });
         return extractOpenAi(response);
       },
       async vision(prompt, image, mimeType) {
@@ -179,7 +183,7 @@ export function createProviders(env = process.env) {
       id: 'anthropic', name: 'Claude API', model: anthropicModel, visionModel: anthropicModel, configured: Boolean(anthropicKey), capabilities: ['chat', 'vision', 'webResearch'],
       async chat(messages, research) {
         const system = research ? `${SYSTEM_PROMPT}\n\n${GOOGLE_SEARCH_PROMPT}` : SYSTEM_PROMPT;
-        const response = await fetchJson('anthropic', 'https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify({ model: anthropicModel, max_tokens: 2048, system, messages: messages.map(({ role, content }) => ({ role, content })), ...(research ? { tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 4 }] } : {}) }) });
+        const response = await fetchJson('anthropic', 'https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify({ model: anthropicModel, max_tokens: 2048, system, messages: messages.map(({ role, content }) => ({ role, content })), ...(research ? { tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 4 }] } : {}) }) }, { timeoutMs: chatTimeoutMs });
         return extractAnthropic(response);
       },
       async vision(prompt, image, mimeType) {

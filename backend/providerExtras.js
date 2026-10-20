@@ -1,4 +1,5 @@
 const BASE_SYSTEM = 'You are WUK AI, a clear, useful personal assistant created by Wuk72. Be honest about uncertainty.';
+const CHAT_TIMEOUT_MS = 25_000;
 
 function isConfigured(value) { return Boolean(value && !/replace|placeholder|change.?me/i.test(value)); }
 
@@ -74,11 +75,11 @@ export function createAdditionalProviders(env, { ProviderError, normalizeCitatio
       id: 'groq', name: 'Groq', model: groqModel, visionModel: groqVisionModel, configured: Boolean(groqKey), capabilities: ['chat', 'vision', 'webResearch'],
       async chat(messages, research) {
         if (research) {
-          const response = await jsonRequest(ProviderError, 'groq', 'https://api.groq.com/openai/v1/responses', groqKey, { model: groqModel, instructions: BASE_SYSTEM, input: messages.map(m => `${m.role}: ${m.content}`).join('\n\n'), tools: [{ type: 'browser_search' }], tool_choice: 'required' });
+          const response = await jsonRequest(ProviderError, 'groq', 'https://api.groq.com/openai/v1/responses', groqKey, { model: groqModel, instructions: BASE_SYSTEM, input: messages.map(m => `${m.role}: ${m.content}`).join('\n\n'), tools: [{ type: 'browser_search' }], tool_choice: 'required' }, { timeoutMs: CHAT_TIMEOUT_MS });
           const citations = (response.output || []).flatMap(item => (item.content || []).flatMap(part => (part.annotations || []).filter(annotation => annotation.url).map(annotation => ({ url: annotation.url, title: annotation.title || annotation.url }))));
           return { text: response.output_text?.trim() || '', citations: normalizeCitations(citations), searched: true };
         }
-        const response = await jsonRequest(ProviderError, 'groq', groqUrl, groqKey, { model: groqModel, messages: compatibleMessages(messages) });
+        const response = await jsonRequest(ProviderError, 'groq', groqUrl, groqKey, { model: groqModel, messages: compatibleMessages(messages) }, { timeoutMs: CHAT_TIMEOUT_MS });
         return extractCompatible(response, normalizeCitations);
       },
       async vision(prompt, image, mimeType) {
@@ -89,7 +90,7 @@ export function createAdditionalProviders(env, { ProviderError, normalizeCitatio
     openrouter: {
       id: 'openrouter', name: 'OpenRouter', model: routerModel, visionModel: routerModel, imageModel: routerImageModel, configured: Boolean(routerKey), capabilities: ['chat', 'vision', 'webResearch', 'image'],
       async chat(messages, research) {
-        const response = await jsonRequest(ProviderError, 'openrouter', 'https://openrouter.ai/api/v1/chat/completions', routerKey, { model: routerModel, messages: compatibleMessages(messages), ...(research ? { tools: [{ type: 'openrouter:web_search' }] } : {}) });
+        const response = await jsonRequest(ProviderError, 'openrouter', 'https://openrouter.ai/api/v1/chat/completions', routerKey, { model: routerModel, messages: compatibleMessages(messages), ...(research ? { tools: [{ type: 'openrouter:web_search' }] } : {}) }, { timeoutMs: CHAT_TIMEOUT_MS });
         return extractCompatible(response, normalizeCitations);
       },
       async vision(prompt, image, mimeType) {
@@ -106,7 +107,7 @@ export function createAdditionalProviders(env, { ProviderError, normalizeCitatio
     cloudflare: {
       id: 'cloudflare', name: 'Cloudflare Workers AI', model: cloudflareModel, visionModel: cloudflareVisionModel, imageModel: cloudflareImageModel, configured: Boolean(cloudflareKey && cloudflareAccount), capabilities: ['chat', 'vision', 'image'],
       async chat(messages) {
-        const response = await jsonRequest(ProviderError, 'cloudflare', `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cloudflareAccount)}/ai/v1/chat/completions`, cloudflareKey, { model: cloudflareModel, messages: compatibleMessages(messages) });
+        const response = await jsonRequest(ProviderError, 'cloudflare', `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cloudflareAccount)}/ai/v1/chat/completions`, cloudflareKey, { model: cloudflareModel, messages: compatibleMessages(messages) }, { timeoutMs: CHAT_TIMEOUT_MS });
         return extractCompatible(response, normalizeCitations);
       },
       async vision(prompt, image, mimeType) {
@@ -131,13 +132,13 @@ export function createAdditionalProviders(env, { ProviderError, normalizeCitatio
       id: 'mistral', name: 'Mistral', model: mistralModel, visionModel: mistralVisionModel, imageModel: mistralModel, configured: Boolean(mistralKey), capabilities: ['chat', 'vision', 'webResearch', 'image'],
       async chat(messages, research) {
         if (research) {
-          const response = await jsonRequest(ProviderError, 'mistral', 'https://api.mistral.ai/v1/conversations', mistralKey, { model: mistralModel, instructions: `${BASE_SYSTEM} Use web_search for current facts. Cite retrieved sources.`, inputs: messages.map(m => `${m.role}: ${m.content}`).join('\n\n'), tools: [{ type: 'web_search' }], store: false });
+          const response = await jsonRequest(ProviderError, 'mistral', 'https://api.mistral.ai/v1/conversations', mistralKey, { model: mistralModel, instructions: `${BASE_SYSTEM} Use web_search for current facts. Cite retrieved sources.`, inputs: messages.map(m => `${m.role}: ${m.content}`).join('\n\n'), tools: [{ type: 'web_search' }], store: false }, { timeoutMs: CHAT_TIMEOUT_MS });
           const entries = response.outputs || [];
           const content = entries.flatMap(entry => entry.content || []);
           const citations = content.filter(part => part.url).map(part => ({ url: part.url, title: part.title || part.url }));
           return { text: content.filter(part => part.type === 'text').map(part => part.text).join('\n').trim(), citations: normalizeCitations(citations), searched: true };
         }
-        const response = await jsonRequest(ProviderError, 'mistral', 'https://api.mistral.ai/v1/chat/completions', mistralKey, { model: mistralModel, messages: compatibleMessages(messages) });
+        const response = await jsonRequest(ProviderError, 'mistral', 'https://api.mistral.ai/v1/chat/completions', mistralKey, { model: mistralModel, messages: compatibleMessages(messages) }, { timeoutMs: CHAT_TIMEOUT_MS });
         return extractCompatible(response, normalizeCitations);
       },
       async vision(prompt, image, mimeType) {
