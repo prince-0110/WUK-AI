@@ -161,6 +161,41 @@ export function createProviders(env = process.env) {
           const timedOut = error?.name === 'AbortError' || error?.name === 'TimeoutError' || /timed out|timeout|aborted/i.test(error?.message || '');
           throw new ProviderError('gemini', Number(error?.status) || (timedOut ? 504 : 0));
         }
+      },
+      async vision(prompt, image, mimeType) {
+        try {
+          const interaction = await gemini.interactions.create({
+            model: geminiModel,
+            input: [
+              { type: 'text', text: prompt || 'Describe this image and answer what you can see.' },
+              { type: 'image', data: image, mime_type: mimeType }
+            ],
+            system_instruction: SYSTEM_PROMPT,
+            store: false
+          });
+          return extractGeminiText(interaction);
+        } catch (error) {
+          throw new ProviderError('gemini', Number(error?.status) || 0);
+        }
+      },
+      async generateImage(prompt) {
+        try {
+          const response = await gemini.models.generateContent({
+            model: geminiImageModel,
+            contents: prompt,
+            config: { responseModalities: ['IMAGE'] }
+          });
+          const parts = response.candidates?.flatMap(candidate => candidate.content?.parts || []) || [];
+          const generated = parts.find(part => part.inlineData?.data);
+          if (!generated) throw new ProviderError('gemini', 502);
+          return {
+            data: generated.inlineData.data,
+            mimeType: generated.inlineData.mimeType || 'image/png'
+          };
+        } catch (error) {
+          if (error instanceof ProviderError) throw error;
+          throw new ProviderError('gemini', Number(error?.status) || 0);
+        }
       }
     },
     openai: {
