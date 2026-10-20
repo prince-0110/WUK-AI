@@ -50,7 +50,7 @@ const needsFreshResearch = raw => /\b(latest|today|yesterday|current|currently|r
 const localCommand = raw => {
   const q = raw.trim().toLowerCase();
   if (/^(hi|hello|hey|good morning|good evening)\b/.test(q)) return { reply: 'Hello. WUK AI is ready. What can I help with?' };
-  if (q.includes('your name') || q.includes('who are you')) return { reply: 'I’m WUK AI by Wuk72. I can save notes and answer a few commands locally. Open-ended AI answers use a provider configured on the private WUK AI backend.' };
+  if (q.includes('your name') || /\bwho\s+(?:are\s+you|are\s+u|r\s+u|ru)\b/.test(q)) return { reply: 'I’m WUK AI by Wuk72. I can save notes and answer a few commands locally. Open-ended AI answers use a provider configured on the private WUK AI backend.' };
   if (q.includes('time')) return { reply: `The time on this device is ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.` };
   if (q.includes('date') || q.includes('day is it')) return { reply: `Today is ${new Date().toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.` };
   if (q.startsWith('note ') || q.startsWith('remember ')) return { note: raw.replace(/^(note|remember)\s+/i, '').trim() };
